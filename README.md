@@ -6,10 +6,12 @@ TypeScript와 discord.js로 만든 간단한 Discord 슬래시 명령어 봇입�
 
 ## 포함된 기능
 
-- `/핑`: 봇의 WebSocket 응답 속도 확인
-- `/서버`: 현재 서버 이름, ID, 멤버 수 확인
-- `/사용자`: 내 Discord 계정 정보 확인
-- `/도움말`: 사용할 수 있는 명령어 안내
+- `/테스트 기능:<선택>`: 명령어 옵션에서 다음 기능 중 하나를 실행
+    - 핑: 봇의 WebSocket 응답 속도 확인
+    - 서버: 현재 서버 이름, ID, 멤버 수 확인
+    - 사용자: 내 Discord 계정 정보 확인
+    - 도움말: 사용할 수 있는 테스트 기능 안내
+    - 인사: 꼬맹통봇과 인사
 - 환경 변수 유효성 검사
 - ESLint, Prettier, TypeScript, Vitest 기반 품질 검사
 - GitHub Actions CI
@@ -67,7 +69,7 @@ TypeScript와 discord.js로 만든 간단한 Discord 슬래시 명령어 봇입�
 ├── .github/workflows/ci.yml   # GitHub Actions 품질 검사
 ├── src/
 │   ├── bot/create-client.ts   # Discord 클라이언트와 이벤트 처리
-│   ├── commands/              # 슬래시 명령어 모듈
+│   ├── commands/test.ts       # 기능 선택 옵션과 다섯 테스트 기능
 │   ├── config/env.ts          # 환경 변수 검증
 │   ├── types/command.ts       # 공통 명령어 타입
 │   ├── deploy-commands.ts     # Discord API 명령어 등록
@@ -79,7 +81,7 @@ TypeScript와 discord.js로 만든 간단한 Discord 슬래시 명령어 봇입�
 └── tsconfig.json              # TypeScript 컴파일 설정
 ```
 
-새 명령어는 `src/commands`에 `BotCommand` 타입으로 작성한 후 `src/commands/index.ts`의 `commands` 배열에 추가합니다.
+새 테스트 기능은 `src/commands/test.ts`의 명령어 옵션 선택지와 응답 생성 로직에 함께 추가합니다.
 
 ## 개발 명령어
 

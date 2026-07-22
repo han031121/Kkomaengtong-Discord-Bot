@@ -1,5 +1,5 @@
-import { Client, Collection, Events, GatewayIntentBits } from "discord.js";
-import type { Interaction } from "discord.js";
+import { Client, Collection, Events, GatewayIntentBits, MessageFlags } from "discord.js";
+import type { ChatInputCommandInteraction, Interaction, RepliableInteraction } from "discord.js";
 
 import { commands } from "../commands/index.js";
 import type { BotCommand } from "../types/command.js";
@@ -22,11 +22,7 @@ export function createClient(): Client {
         console.log(`${readyClient.user.tag}(으)로 로그인했습니다.`);
     });
 
-    async function handleInteraction(interaction: Interaction): Promise<void> {
-        if (!interaction.isChatInputCommand()) {
-            return;
-        }
-
+    async function handleChatInputCommand(interaction: ChatInputCommandInteraction): Promise<void> {
         const command = commandMap.get(interaction.commandName);
 
         if (command === undefined) {
@@ -38,18 +34,29 @@ export function createClient(): Client {
             await command.execute(interaction);
         } catch (error) {
             console.error(`명령어 실행 실패: ${interaction.commandName}`, error);
-
-            const response = {
-                content: "명령어를 처리하는 중 오류가 발생했습니다.",
-                ephemeral: true,
-            } as const;
-
-            if (interaction.replied || interaction.deferred) {
-                await interaction.followUp(response);
-            } else {
-                await interaction.reply(response);
-            }
+            await sendErrorResponse(interaction);
         }
+    }
+
+    async function sendErrorResponse(interaction: RepliableInteraction): Promise<void> {
+        const response = {
+            content: "요청을 처리하는 중 오류가 발생했습니다.",
+            flags: MessageFlags.Ephemeral,
+        } as const;
+
+        if (interaction.replied || interaction.deferred) {
+            await interaction.followUp(response);
+        } else {
+            await interaction.reply(response);
+        }
+    }
+
+    async function handleInteraction(interaction: Interaction): Promise<void> {
+        if (!interaction.isChatInputCommand()) {
+            return;
+        }
+
+        await handleChatInputCommand(interaction);
     }
 
     client.on(Events.InteractionCreate, (interaction) => {
