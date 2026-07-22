@@ -1,0 +1,39 @@
+{
+    "name": "kkomaeng-discord-bot",
+    "version": "0.1.0",
+    "private": true,
+    "description": "간단한 슬래시 명령어를 제공하는 Discord 봇",
+    "type": "module",
+    "packageManager": "npm@11.12.1",
+    "scripts": {
+        "dev": "tsx watch src/index.ts",
+        "build": "tsc",
+        "start": "node dist/index.js",
+        "deploy:commands": "tsx src/deploy-commands.ts",
+        "lint": "eslint .",
+        "format": "prettier --write .",
+        "format:check": "prettier --check .",
+        "typecheck": "tsc --noEmit",
+        "test": "vitest run",
+        "test:watch": "vitest",
+        "check": "npm run lint && npm run format:check && npm run typecheck && npm run test"
+    },
+    "engines": {
+        "node": ">=22.0.0"
+    },
+    "dependencies": {
+        "discord.js": "^14.27.0",
+        "dotenv": "^17.4.2",
+        "zod": "^4.4.3"
+    },
+    "devDependencies": {
+        "@eslint/js": "^10.0.1",
+        "@types/node": "^26.1.1",
+        "eslint": "^10.7.0",
+        "prettier": "^3.9.6",
+        "tsx": "^4.23.1",
+        "typescript": "^6.0.3",
+        "typescript-eslint": "^8.65.0",
+        "vitest": "^4.1.10"
+    }
+}
