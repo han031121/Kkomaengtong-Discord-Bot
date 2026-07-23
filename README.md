@@ -12,6 +12,15 @@ TypeScript와 discord.js로 만든 간단한 Discord 슬래시 명령어 봇입�
     - 사용자: 내 Discord 계정 정보 확인
     - 도움말: 사용할 수 있는 테스트 기능 안내
     - 인사: 꼬맹통봇과 인사
+- `/워들 키워드:<5글자 영단어>`: 오늘의 NYT Wordle 플레이
+    - 첫 입력으로 사용자별 게임과 채널 구성원 모두가 볼 수 있는 일반 메시지 패널 생성
+    - 이후 입력은 기존 패널을 수정하며 최대 6회까지 진행
+    - 공개 패널에는 색상 타일만 표시하고 소유자 전용 `내 게임 보기` 버튼 제공
+    - 비공개 화면에서 색상 추측 기록과 알파벳순 글자 상태를 표시하고 새 화면을 열 때 이전 화면 삭제
+    - 정답을 맞힌 결과에서만 결과 공유, 게임 패널 이동, 스포하기 버튼 제공
+    - 성공 결과 공유는 완성된 패널을 채널 아래에 한 번 더 게시하고 공유 버튼을 비활성화
+    - NYT Wordle 날짜별 엔드포인트에서 서울 기준 오늘의 퍼즐을 조회
+    - Free Dictionary API에서 입력 단어를 검증하며 잘못된 단어는 횟수에서 제외
 - 환경 변수 유효성 검사
 - ESLint, Prettier, TypeScript, Vitest 기반 품질 검사
 - GitHub Actions CI
@@ -21,6 +30,7 @@ TypeScript와 discord.js로 만든 간단한 Discord 슬래시 명령어 봇입�
 - Node.js 22 이상
 - npm 11 이상
 - Discord 계정 및 테스트용 Discord 서버
+- NYT Wordle과 Free Dictionary API에 접속할 수 있는 네트워크 환경
 
 ## 시작하기
 
@@ -70,6 +80,8 @@ TypeScript와 discord.js로 만든 간단한 Discord 슬래시 명령어 봇입�
 ├── src/
 │   ├── bot/create-client.ts   # Discord 클라이언트와 이벤트 처리
 │   ├── commands/test.ts       # 기능 선택 옵션과 다섯 테스트 기능
+│   ├── commands/wordle.ts     # Wordle 슬래시 명령어와 패널 갱신
+│   ├── features/wordle/       # 게임 규칙, 외부 API, 세션 및 패널
 │   ├── config/env.ts          # 환경 변수 검증
 │   ├── types/command.ts       # 공통 명령어 타입
 │   ├── deploy-commands.ts     # Discord API 명령어 등록
@@ -82,6 +94,8 @@ TypeScript와 discord.js로 만든 간단한 Discord 슬래시 명령어 봇입�
 ```
 
 새 테스트 기능은 `src/commands/test.ts`의 명령어 옵션 선택지와 응답 생성 로직에 함께 추가합니다.
+
+Wordle 진행 상태는 사용자와 퍼즐 날짜별로 봇 프로세스 메모리에 저장됩니다. 따라서 봇을 재시작하면 진행 중인 게임은 초기화되며, 다음 입력에서 새 공개 패널이 생성됩니다. NYT와 사전 응답은 같은 날짜 또는 단어에 대해 프로세스가 실행되는 동안 캐시됩니다.
 
 ## 개발 명령어
 

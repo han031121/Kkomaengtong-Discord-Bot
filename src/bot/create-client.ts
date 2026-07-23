@@ -1,7 +1,13 @@
 import { Client, Collection, Events, GatewayIntentBits, MessageFlags } from "discord.js";
-import type { ChatInputCommandInteraction, Interaction, RepliableInteraction } from "discord.js";
+import type {
+    ButtonInteraction,
+    ChatInputCommandInteraction,
+    Interaction,
+    RepliableInteraction,
+} from "discord.js";
 
 import { commands } from "../commands/index.js";
+import { handleWordleButton, isWordleButton } from "../commands/wordle.js";
 import type { BotCommand } from "../types/command.js";
 
 export function createClient(): Client {
@@ -38,13 +44,28 @@ export function createClient(): Client {
         }
     }
 
+    async function handleButtonInteraction(interaction: ButtonInteraction): Promise<void> {
+        if (!isWordleButton(interaction.customId)) {
+            return;
+        }
+
+        try {
+            await handleWordleButton(interaction);
+        } catch (error) {
+            console.error(`버튼 처리 실패: ${interaction.customId}`, error);
+            await sendErrorResponse(interaction);
+        }
+    }
+
     async function sendErrorResponse(interaction: RepliableInteraction): Promise<void> {
         const response = {
             content: "요청을 처리하는 중 오류가 발생했습니다.",
             flags: MessageFlags.Ephemeral,
         } as const;
 
-        if (interaction.replied || interaction.deferred) {
+        if (interaction.deferred) {
+            await interaction.editReply({ content: response.content });
+        } else if (interaction.replied) {
             await interaction.followUp(response);
         } else {
             await interaction.reply(response);
@@ -52,11 +73,14 @@ export function createClient(): Client {
     }
 
     async function handleInteraction(interaction: Interaction): Promise<void> {
-        if (!interaction.isChatInputCommand()) {
+        if (interaction.isChatInputCommand()) {
+            await handleChatInputCommand(interaction);
             return;
         }
 
-        await handleChatInputCommand(interaction);
+        if (interaction.isButton()) {
+            await handleButtonInteraction(interaction);
+        }
     }
 
     client.on(Events.InteractionCreate, (interaction) => {
