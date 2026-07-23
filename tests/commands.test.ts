@@ -48,7 +48,7 @@ describe("슬래시 명령어 정의", () => {
         ]);
     });
 
-    it("Wordle 명령어는 별도 옵션 없이 게임을 시작합니다", () => {
+    it("Wordle 명령어는 선택적인 5글자 단어 옵션을 사용합니다", () => {
         const command = commands.find((candidate) => candidate.data.name === "워들");
 
         expect(command).toBeDefined();
@@ -59,7 +59,15 @@ describe("슬래시 명령어 정의", () => {
 
         const commandData = command.data.toJSON();
 
-        expect(commandData.options ?? []).toEqual([]);
+        expect(commandData.options).toHaveLength(1);
+        expect(commandData.options?.[0]).toMatchObject({
+            type: ApplicationCommandOptionType.String,
+            name: "단어",
+            description: "모달을 열지 않고 바로 제출할 5글자 영단어",
+            required: false,
+            min_length: 5,
+            max_length: 5,
+        });
         expect(commandData.dm_permission).toBe(false);
     });
 });
