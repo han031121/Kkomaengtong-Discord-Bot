@@ -1,19 +1,29 @@
-import type { ButtonInteraction, ChatInputCommandInteraction, Message } from "discord.js";
+import type {
+    ButtonInteraction,
+    ChatInputCommandInteraction,
+    Message,
+    ModalSubmitInteraction,
+} from "discord.js";
 import { describe, expect, it, vi } from "vitest";
 
 import {
-    createPublicWordlePanelButtons,
+    createWordleGuessModal,
+    createWordlePlayingButtons,
     createWordleResultButtons,
     createWordleResultComponents,
     handleSpoilerButton,
     handleWordleButton,
+    handleWordleModal,
     isWordleButton,
+    isWordleModal,
     sendPublicWordlePanel,
     showPrivateWordleState,
     updatePublicWordlePanel,
+    wordleCommand,
 } from "../src/commands/wordle.js";
 import { createWordleGame, submitGuess } from "../src/features/wordle/game.js";
 import type { WordlePuzzle } from "../src/features/wordle/game.js";
+import { NytWordleClient } from "../src/features/wordle/nyt-wordle-client.js";
 import { WordleSessionStore } from "../src/features/wordle/session-store.js";
 import type { WordleSession } from "../src/features/wordle/session-store.js";
 
@@ -25,6 +35,63 @@ const puzzle: WordlePuzzle = {
 };
 
 describe("Wordle 공개 메시지 전송", () => {
+    it("/워들 실행 시 공개 패널 없이 버튼이 있는 비공개 화면만 표시합니다", async () => {
+        const userId = "32345678901234567";
+        const send = vi.fn();
+        const editReply = vi.fn().mockResolvedValue({
+            id: "initial-private-message",
+        });
+        let deferred = false;
+        const interaction = {
+            id: "initial-command",
+            get deferred() {
+                return deferred;
+            },
+            deferReply: vi.fn().mockImplementation(() => {
+                deferred = true;
+                return Promise.resolve();
+            }),
+            editReply,
+            channel: {
+                isSendable: () => true,
+                send,
+            },
+            channelId: "channel-id",
+            client: {
+                channels: {
+                    fetch: vi.fn(),
+                },
+            },
+            user: {
+                id: userId,
+                displayAvatarURL: () => "https://cdn.example.com/avatar.png",
+            },
+        } as unknown as ChatInputCommandInteraction;
+        const puzzleRequest = vi
+            .spyOn(NytWordleClient.prototype, "getTodaysPuzzle")
+            .mockResolvedValue(puzzle);
+
+        try {
+            await wordleCommand.execute(interaction);
+        } finally {
+            puzzleRequest.mockRestore();
+        }
+
+        expect(send).not.toHaveBeenCalled();
+        expect(editReply).toHaveBeenCalledOnce();
+
+        const privateResponse = editReply.mock.calls[0]?.[0] as {
+            components: { toJSON(): unknown }[];
+            flags: number;
+        };
+        const serializedResponse = JSON.stringify(privateResponse.components[0]?.toJSON());
+
+        expect(privateResponse.flags).toBe(32_768);
+        expect(serializedResponse).toContain("### 나의 Wordle #1860");
+        expect(serializedResponse).toContain("단어 입력");
+        expect(serializedResponse).toContain("현재 진행 공유");
+    });
+
     it("상호작용 후속 응답이 아닌 채널 일반 메시지로 패널을 전송합니다", async () => {
         const panelMessage = { id: "panel-message" } as Message;
         const send = vi
@@ -70,7 +137,7 @@ describe("Wordle 공개 메시지 전송", () => {
         expect(sendOptions).not.toHaveProperty("content");
         expect(sendOptions).not.toHaveProperty("embeds");
         expect(containerJson).toContain("<@12345678901234567>님의 Wordle #1860");
-        expect(containerJson).toContain("내 게임 보기");
+        expect(containerJson).not.toContain("내 게임 보기");
         expect(fetchChannel).not.toHaveBeenCalled();
     });
 
@@ -164,23 +231,71 @@ describe("Wordle 공개 메시지 전송", () => {
 });
 
 describe("Wordle 결과 버튼", () => {
-    it("공개 패널에 소유자용 게임 보기 버튼을 생성합니다", () => {
-        expect(
-            createPublicWordlePanelButtons(createWordleGame(puzzle), "12345678901234567").toJSON(),
-        ).toEqual({
+    it("진행 중인 비공개 화면에 단어 입력과 현재 진행 공유 버튼을 생성합니다", () => {
+        const session: WordleSession = {
+            game: createWordleGame(puzzle),
+            panelMessage: undefined,
+            privateResponseInteraction: undefined,
+            privateResponseMessageId: undefined,
+            resultShared: false,
+        };
+
+        expect(createWordlePlayingButtons(session, "12345678901234567").toJSON()).toEqual({
             type: 1,
             components: [
                 {
                     type: 2,
-                    custom_id: "wordle:view:2026-07-23:12345678901234567",
-                    label: "내 게임 보기",
+                    custom_id: "wordle:input:2026-07-23:12345678901234567",
+                    label: "단어 입력",
+                    style: 1,
+                },
+                {
+                    type: 2,
+                    custom_id: "wordle:progress-share:2026-07-23:12345678901234567",
+                    label: "현재 진행 공유",
                     style: 2,
                 },
             ],
         });
     });
 
-    it("결과 공유, 게임 패널 이동, 스포하기 버튼을 순서대로 생성합니다", () => {
+    it("현재 진행을 공유한 뒤에는 단어 입력 버튼만 표시합니다", () => {
+        const session: WordleSession = {
+            game: createWordleGame(puzzle),
+            panelMessage: {
+                url: "https://discord.com/channels/guild/channel/panel",
+            } as Message,
+            privateResponseInteraction: undefined,
+            privateResponseMessageId: undefined,
+            resultShared: false,
+        };
+        const actionRow = createWordlePlayingButtons(session, "12345678901234567").toJSON();
+
+        expect(actionRow.components).toEqual([
+            {
+                type: 2,
+                custom_id: "wordle:input:2026-07-23:12345678901234567",
+                label: "단어 입력",
+                style: 1,
+            },
+        ]);
+    });
+
+    it("단어 입력 모달에 5글자 영단어 입력란을 생성합니다", () => {
+        const modalJson = createWordleGuessModal(puzzle.printDate, "12345678901234567").toJSON();
+        const serializedModal = JSON.stringify(modalJson);
+
+        expect(modalJson).toMatchObject({
+            custom_id: "wordle:guess-modal:2026-07-23:12345678901234567",
+            title: "Wordle 단어 입력",
+        });
+        expect(serializedModal).toContain("5글자 영단어");
+        expect(serializedModal).toContain("wordle:guess");
+        expect(serializedModal).toContain('"min_length":5');
+        expect(serializedModal).toContain('"max_length":5');
+    });
+
+    it("결과 공유와 스포하기 버튼을 순서대로 생성합니다", () => {
         const panelMessage = {
             url: "https://discord.com/channels/guild/channel/message",
         } as Message;
@@ -204,15 +319,30 @@ describe("Wordle 결과 버튼", () => {
                 },
                 {
                     type: 2,
-                    label: "게임 패널로 이동",
-                    style: 5,
-                    url: panelMessage.url,
-                },
-                {
-                    type: 2,
                     custom_id: "wordle:spoiler:2026-07-23:12345678901234567",
                     label: "스포하기",
                     style: 4,
+                },
+            ],
+        });
+    });
+
+    it("공개한 진행 패널이 없어도 결과 공유와 스포하기 버튼을 생성합니다", () => {
+        const session: WordleSession = {
+            game: submitGuess(createWordleGame(puzzle), "apple"),
+            panelMessage: undefined,
+            privateResponseInteraction: undefined,
+            privateResponseMessageId: undefined,
+            resultShared: false,
+        };
+
+        expect(createWordleResultButtons(session, "12345678901234567").toJSON()).toMatchObject({
+            components: [
+                {
+                    label: "결과 공유",
+                },
+                {
+                    label: "스포하기",
                 },
             ],
         });
@@ -246,9 +376,17 @@ describe("Wordle 결과 버튼", () => {
     it("Wordle 버튼 식별자는 날짜와 사용자 ID 형식을 검증합니다", () => {
         expect(isWordleButton("wordle:share:2026-07-23:12345678901234567")).toBe(true);
         expect(isWordleButton("wordle:spoiler:2026-07-23:12345678901234567")).toBe(true);
-        expect(isWordleButton("wordle:view:2026-07-23:12345678901234567")).toBe(true);
+        expect(isWordleButton("wordle:view:2026-07-23:12345678901234567")).toBe(false);
+        expect(isWordleButton("wordle:input:2026-07-23:12345678901234567")).toBe(true);
+        expect(isWordleButton("wordle:progress-share:2026-07-23:12345678901234567")).toBe(true);
         expect(isWordleButton("wordle:share:wrong-date:12345678901234567")).toBe(false);
         expect(isWordleButton("another:share:2026-07-23:12345678901234567")).toBe(false);
+    });
+
+    it("Wordle 단어 입력 모달 식별자는 날짜와 사용자 ID 형식을 검증합니다", () => {
+        expect(isWordleModal("wordle:guess-modal:2026-07-23:12345678901234567")).toBe(true);
+        expect(isWordleModal("wordle:guess-modal:wrong-date:12345678901234567")).toBe(false);
+        expect(isWordleModal("wordle:input:2026-07-23:12345678901234567")).toBe(false);
     });
 
     it("스포일러를 비공개 메시지에 답장하지 않고 빨간 컨테이너로 전송합니다", async () => {
@@ -306,65 +444,104 @@ describe("Wordle 결과 버튼", () => {
 });
 
 describe("Wordle 비공개 화면", () => {
-    it("다른 사용자의 공개 패널에서도 버튼을 누른 사용자의 게임을 표시합니다", async () => {
-        const ownerId = "12345678901234567";
-        const viewerId = "22345678901234567";
+    it("단어 입력 버튼을 누르면 해당 사용자의 입력 모달을 표시합니다", async () => {
+        const userId = "12345678901234567";
         const store = new WordleSessionStore();
-        const ownerSession: WordleSession = {
-            game: submitGuess(createWordleGame(puzzle), "alley"),
+        const session: WordleSession = {
+            game: createWordleGame(puzzle),
             panelMessage: {
-                url: "https://discord.com/channels/guild/channel/owner-panel",
+                url: "https://discord.com/channels/guild/channel/panel",
             } as Message,
             privateResponseInteraction: undefined,
             privateResponseMessageId: undefined,
             resultShared: false,
         };
-        const viewerSession: WordleSession = {
-            game: submitGuess(createWordleGame(puzzle), "crane"),
-            panelMessage: {
-                url: "https://discord.com/channels/guild/channel/viewer-panel",
-            } as Message,
-            privateResponseInteraction: undefined,
-            privateResponseMessageId: undefined,
-            resultShared: false,
-        };
-        const reply = vi.fn().mockResolvedValue(undefined);
-        const fetchReply = vi.fn().mockResolvedValue({
-            id: "viewer-private-message",
-        });
+        const showModal = vi.fn().mockResolvedValue(undefined);
         const interaction = {
-            customId: `wordle:view:${puzzle.printDate}:${ownerId}`,
-            id: "viewer-interaction",
-            deferred: false,
-            reply,
-            fetchReply,
+            customId: `wordle:input:${puzzle.printDate}:${userId}`,
             user: {
-                id: viewerId,
+                id: userId,
             },
+            showModal,
         } as unknown as ButtonInteraction;
 
-        store.set(ownerId, puzzle.printDate, ownerSession);
-        store.set(viewerId, puzzle.printDate, viewerSession);
+        store.set(userId, puzzle.printDate, session);
 
         await handleWordleButton(interaction, store);
 
-        expect(reply).toHaveBeenCalledOnce();
-
-        const replyOptions = reply.mock.calls[0]?.[0] as {
-            components: { toJSON(): unknown }[];
-            flags: number;
+        expect(showModal).toHaveBeenCalledOnce();
+        const shownModal = showModal.mock.calls[0]?.[0] as {
+            toJSON(): unknown;
         };
-        const containerJson = JSON.stringify(replyOptions.components[0]?.toJSON());
-
-        expect(replyOptions.flags).toBe(32_832);
-        expect(containerJson).toContain("`CRANE`");
-        expect(containerJson).not.toContain("`ALLEY`");
+        expect(shownModal.toJSON()).toMatchObject({
+            custom_id: `wordle:guess-modal:${puzzle.printDate}:${userId}`,
+            title: "Wordle 단어 입력",
+        });
     });
 
-    it("이전 화면과 지연 응답을 삭제한 뒤 새 비공개 후속 메시지를 생성합니다", async () => {
+    it("현재 진행 공유 버튼을 누르면 공개 패널을 만들고 공유 버튼을 제거합니다", async () => {
+        const userId = "12345678901234567";
+        const store = new WordleSessionStore();
+        const session: WordleSession = {
+            game: createWordleGame(puzzle),
+            panelMessage: undefined,
+            privateResponseInteraction: undefined,
+            privateResponseMessageId: undefined,
+            resultShared: false,
+        };
+        const panelMessage = {
+            id: "public-panel",
+            editable: true,
+            url: "https://discord.com/channels/guild/channel/public-panel",
+        } as Message;
+        const send = vi.fn().mockResolvedValue(panelMessage);
+        const deferUpdate = vi.fn().mockResolvedValue(undefined);
+        const editReply = vi.fn().mockResolvedValue({
+            id: "private-message",
+        });
+        const interaction = {
+            customId: `wordle:progress-share:${puzzle.printDate}:${userId}`,
+            id: "progress-share-interaction",
+            channel: {
+                isSendable: () => true,
+                send,
+            },
+            channelId: "channel-id",
+            client: {
+                channels: {
+                    fetch: vi.fn(),
+                },
+            },
+            deferUpdate,
+            editReply,
+            user: {
+                id: userId,
+                displayAvatarURL: () => "https://cdn.example.com/avatar.png",
+            },
+        } as unknown as ButtonInteraction;
+
+        store.set(userId, puzzle.printDate, session);
+
+        await handleWordleButton(interaction, store);
+
+        expect(deferUpdate).toHaveBeenCalledOnce();
+        expect(send).toHaveBeenCalledOnce();
+        expect(editReply).toHaveBeenCalledOnce();
+        expect(store.get(userId, puzzle.printDate)?.panelMessage).toBe(panelMessage);
+
+        const editOptions = editReply.mock.calls[0]?.[0] as {
+            components: { toJSON(): unknown }[];
+        };
+        const serializedResponse = JSON.stringify(editOptions.components[0]?.toJSON());
+
+        expect(serializedResponse).toContain("현재 진행 상황을 공개했습니다.");
+        expect(serializedResponse).not.toContain("현재 진행 공유");
+        expect(serializedResponse).not.toContain("게임 패널로 이동");
+    });
+
+    it("이전 화면을 삭제한 뒤 현재 지연 응답을 비공개 게임 화면으로 수정합니다", async () => {
         const previousDeleteReply = vi.fn().mockResolvedValue(undefined);
-        const currentDeleteReply = vi.fn().mockResolvedValue(undefined);
-        const followUp = vi.fn<(options: unknown) => Promise<Message>>().mockResolvedValue({
+        const editReply = vi.fn<(options: unknown) => Promise<Message>>().mockResolvedValue({
             id: "private-message",
         } as Message);
         const previousInteraction = {
@@ -374,8 +551,7 @@ describe("Wordle 비공개 화면", () => {
         const currentInteraction = {
             id: "current-interaction",
             deferred: true,
-            deleteReply: currentDeleteReply,
-            followUp,
+            editReply,
             user: {
                 id: "12345678901234567",
             },
@@ -393,21 +569,175 @@ describe("Wordle 비공개 화면", () => {
         await showPrivateWordleState(currentInteraction, session, "진행 상황입니다.");
 
         expect(previousDeleteReply).toHaveBeenCalledWith("previous-private-message");
-        expect(currentDeleteReply).toHaveBeenCalledOnce();
-        expect(followUp).toHaveBeenCalledOnce();
-        expect(followUp.mock.calls[0]?.[0]).toMatchObject({
+        expect(editReply).toHaveBeenCalledOnce();
+        expect(editReply.mock.calls[0]?.[0]).toMatchObject({
             components: [expect.anything()],
-            flags: 32_832,
+            flags: 32_768,
         });
 
-        const followUpOptions = followUp.mock.calls[0]?.[0] as {
+        const editOptions = editReply.mock.calls[0]?.[0] as {
             components: { toJSON(): unknown }[];
         };
-        const containerJson = JSON.stringify(followUpOptions.components[0]?.toJSON());
+        const containerJson = JSON.stringify(editOptions.components[0]?.toJSON());
 
-        expect(followUpOptions).not.toHaveProperty("content");
-        expect(followUpOptions).not.toHaveProperty("embeds");
+        expect(editOptions).toMatchObject({
+            content: null,
+            embeds: [],
+        });
         expect(containerJson).toContain("진행 상황입니다.");
         expect(containerJson).toContain("### 나의 Wordle #1860");
+        expect(containerJson).toContain("단어 입력");
+    });
+});
+
+describe("Wordle 모달 입력", () => {
+    it("사전에 없는 단어는 횟수를 차감하지 않고 입력 버튼이 있는 화면으로 돌아갑니다", async () => {
+        const userId = "12345678901234567";
+        const store = new WordleSessionStore();
+        const session: WordleSession = {
+            game: createWordleGame(puzzle),
+            panelMessage: undefined,
+            privateResponseInteraction: undefined,
+            privateResponseMessageId: undefined,
+            resultShared: false,
+        };
+        const deferUpdate = vi.fn().mockResolvedValue(undefined);
+        const editReply = vi.fn().mockResolvedValue({
+            id: "private-message",
+        });
+        const interaction = {
+            customId: `wordle:guess-modal:${puzzle.printDate}:${userId}`,
+            id: "modal-interaction",
+            deferUpdate,
+            editReply,
+            fields: {
+                getTextInputValue: () => "zzzzz",
+            },
+            user: {
+                id: userId,
+            },
+        } as unknown as ModalSubmitInteraction;
+        const dictionary = {
+            isEnglishWord: vi.fn().mockResolvedValue(false),
+        };
+
+        store.set(userId, puzzle.printDate, session);
+
+        await handleWordleModal(interaction, store, dictionary);
+
+        expect(dictionary.isEnglishWord).toHaveBeenCalledWith("zzzzz");
+        expect(store.get(userId, puzzle.printDate)?.game.guesses).toEqual([]);
+        expect(deferUpdate).toHaveBeenCalledOnce();
+        expect(editReply).toHaveBeenCalledOnce();
+
+        const response = editReply.mock.calls[0]?.[0] as {
+            components: { toJSON(): unknown }[];
+            flags: number;
+        };
+        const serializedResponse = JSON.stringify(response.components[0]?.toJSON());
+
+        expect(response.flags).toBe(32_768);
+        expect(serializedResponse).toContain("사전에 등록된 5글자 영단어가 아닙니다.");
+        expect(serializedResponse).toContain("단어 입력");
+    });
+
+    it("현재 진행을 공유하지 않은 게임은 단어 입력 후에도 공개 패널을 만들지 않습니다", async () => {
+        const userId = "12345678901234567";
+        const store = new WordleSessionStore();
+        const session: WordleSession = {
+            game: createWordleGame(puzzle),
+            panelMessage: undefined,
+            privateResponseInteraction: undefined,
+            privateResponseMessageId: undefined,
+            resultShared: false,
+        };
+        const deferUpdate = vi.fn().mockResolvedValue(undefined);
+        const editReply = vi.fn().mockResolvedValue({
+            id: "private-message",
+        });
+        const interaction = {
+            customId: `wordle:guess-modal:${puzzle.printDate}:${userId}`,
+            id: "modal-interaction",
+            deferUpdate,
+            editReply,
+            fields: {
+                getTextInputValue: () => "CRANE",
+            },
+            user: {
+                id: userId,
+                displayAvatarURL: () => "https://cdn.example.com/avatar.png",
+            },
+        } as unknown as ModalSubmitInteraction;
+        const dictionary = {
+            isEnglishWord: vi.fn().mockResolvedValue(true),
+        };
+
+        store.set(userId, puzzle.printDate, session);
+
+        await handleWordleModal(interaction, store, dictionary);
+
+        const updatedSession = store.get(userId, puzzle.printDate);
+
+        expect(updatedSession?.panelMessage).toBeUndefined();
+        expect(updatedSession?.game.guesses.map((guess) => guess.word)).toEqual(["crane"]);
+        expect(deferUpdate).toHaveBeenCalledOnce();
+        expect(editReply).toHaveBeenCalledOnce();
+    });
+
+    it("현재 진행을 공유한 게임은 단어 입력 후 공개 패널과 기존 비공개 화면을 수정합니다", async () => {
+        const userId = "12345678901234567";
+        const store = new WordleSessionStore();
+        const panelMessage = {
+            editable: true,
+            url: "https://discord.com/channels/guild/channel/panel",
+        } as Message;
+        const panelEdit = vi.fn().mockResolvedValue(panelMessage);
+        Object.assign(panelMessage, { edit: panelEdit });
+        const session: WordleSession = {
+            game: createWordleGame(puzzle),
+            panelMessage,
+            privateResponseInteraction: undefined,
+            privateResponseMessageId: undefined,
+            resultShared: false,
+        };
+        const deferUpdate = vi.fn().mockResolvedValue(undefined);
+        const editReply = vi.fn().mockResolvedValue({
+            id: "private-message",
+        });
+        const interaction = {
+            customId: `wordle:guess-modal:${puzzle.printDate}:${userId}`,
+            id: "modal-interaction",
+            deferUpdate,
+            editReply,
+            fields: {
+                getTextInputValue: () => "CRANE",
+            },
+            user: {
+                id: userId,
+                displayAvatarURL: () => "https://cdn.example.com/avatar.png",
+            },
+        } as unknown as ModalSubmitInteraction;
+        const dictionary = {
+            isEnglishWord: vi.fn().mockResolvedValue(true),
+        };
+
+        store.set(userId, puzzle.printDate, session);
+
+        await handleWordleModal(interaction, store, dictionary);
+
+        expect(panelEdit).toHaveBeenCalledOnce();
+        expect(
+            store.get(userId, puzzle.printDate)?.game.guesses.map((guess) => guess.word),
+        ).toEqual(["crane"]);
+        expect(deferUpdate).toHaveBeenCalledOnce();
+        expect(editReply).toHaveBeenCalledOnce();
+
+        const response = editReply.mock.calls[0]?.[0] as {
+            components: { toJSON(): unknown }[];
+        };
+        const serializedResponse = JSON.stringify(response.components[0]?.toJSON());
+
+        expect(serializedResponse).toContain("`CRANE`");
+        expect(serializedResponse).toContain("단어 입력");
     });
 });

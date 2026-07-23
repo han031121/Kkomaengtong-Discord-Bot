@@ -3,11 +3,17 @@ import type {
     ButtonInteraction,
     ChatInputCommandInteraction,
     Interaction,
+    ModalSubmitInteraction,
     RepliableInteraction,
 } from "discord.js";
 
 import { commands } from "../commands/index.js";
-import { handleWordleButton, isWordleButton } from "../commands/wordle.js";
+import {
+    handleWordleButton,
+    handleWordleModal,
+    isWordleButton,
+    isWordleModal,
+} from "../commands/wordle.js";
 import type { BotCommand } from "../types/command.js";
 
 export function createClient(): Client {
@@ -57,6 +63,21 @@ export function createClient(): Client {
         }
     }
 
+    async function handleModalSubmitInteraction(
+        interaction: ModalSubmitInteraction,
+    ): Promise<void> {
+        if (!isWordleModal(interaction.customId)) {
+            return;
+        }
+
+        try {
+            await handleWordleModal(interaction);
+        } catch (error) {
+            console.error(`모달 처리 실패: ${interaction.customId}`, error);
+            await sendErrorResponse(interaction);
+        }
+    }
+
     async function sendErrorResponse(interaction: RepliableInteraction): Promise<void> {
         const response = {
             content: "요청을 처리하는 중 오류가 발생했습니다.",
@@ -80,6 +101,11 @@ export function createClient(): Client {
 
         if (interaction.isButton()) {
             await handleButtonInteraction(interaction);
+            return;
+        }
+
+        if (interaction.isModalSubmit()) {
+            await handleModalSubmitInteraction(interaction);
         }
     }
 

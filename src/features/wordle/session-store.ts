@@ -1,11 +1,17 @@
-import type { ButtonInteraction, ChatInputCommandInteraction, Message } from "discord.js";
+import type {
+    ButtonInteraction,
+    ChatInputCommandInteraction,
+    Message,
+    ModalSubmitInteraction,
+} from "discord.js";
 
 import type { WordleGame } from "./game.js";
 
 export interface WordleSession {
     game: WordleGame;
-    panelMessage: Message;
-    privateResponseInteraction: ButtonInteraction | ChatInputCommandInteraction | undefined;
+    panelMessage: Message | undefined;
+    privateResponseInteraction:
+        ButtonInteraction | ChatInputCommandInteraction | ModalSubmitInteraction | undefined;
     privateResponseMessageId: string | undefined;
     resultShared: boolean;
 }
