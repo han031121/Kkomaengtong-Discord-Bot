@@ -17,7 +17,12 @@ import {
 } from "../features/wordle/game.js";
 import type { WordleGame, WordlePuzzle } from "../features/wordle/game.js";
 import { NytWordleClient, NytWordleServiceError } from "../features/wordle/nyt-wordle-client.js";
-import { createPrivateWordlePanel, createWordlePanel } from "../features/wordle/panel.js";
+import {
+    createPrivateWordleContainer,
+    createPublicWordleContainer,
+    createWordleNoticeContainer,
+    createWordleSpoilerContainer,
+} from "../features/wordle/panel.js";
 import { WordleSessionStore } from "../features/wordle/session-store.js";
 import type { WordleSession } from "../features/wordle/session-store.js";
 import type { BotCommand } from "../types/command.js";
@@ -60,12 +65,12 @@ data.addStringOption((option) =>
         .setMaxLength(5),
 );
 
-function createPanel(interaction: WordleInteraction, game: WordleGame) {
-    return createWordlePanel(game, interaction.user.displayAvatarURL());
-}
-
-function createPublicPanelContent(userId: string): string {
-    return `<@${userId}>님의 게임`;
+function createPublicPanel(interaction: WordleInteraction, game: WordleGame) {
+    return createPublicWordleContainer(
+        game,
+        interaction.user.id,
+        interaction.user.displayAvatarURL(),
+    ).addActionRowComponents(createPublicWordlePanelButtons(game, interaction.user.id).toJSON());
 }
 
 export async function sendPublicWordlePanel(
@@ -80,9 +85,8 @@ export async function sendPublicWordlePanel(
     }
 
     return channel.send({
-        content: createPublicPanelContent(interaction.user.id),
-        embeds: [createPanel(interaction, game)],
-        components: [createPublicWordlePanelButtons(game, interaction.user.id)],
+        components: [createPublicPanel(interaction, game)],
+        flags: MessageFlags.IsComponentsV2,
         allowedMentions: { users: [interaction.user.id] },
     });
 }
@@ -150,6 +154,32 @@ export function createWordleResultComponents(
     return session.game.status === "won" ? [createWordleResultButtons(session, userId)] : [];
 }
 
+function createPrivatePanel(session: WordleSession, userId: string, notice?: string) {
+    const container = createPrivateWordleContainer(session.game, notice);
+
+    for (const actionRow of createWordleResultComponents(session, userId)) {
+        container.addActionRowComponents(actionRow.toJSON());
+    }
+
+    return container;
+}
+
+function createEphemeralNoticeResponse(content: string) {
+    return {
+        components: [createWordleNoticeContainer(content)],
+        flags: MessageFlags.Ephemeral | MessageFlags.IsComponentsV2,
+    };
+}
+
+function createNoticeEditResponse(content: string) {
+    return {
+        content: null,
+        embeds: [],
+        components: [createWordleNoticeContainer(content)],
+        flags: MessageFlags.IsComponentsV2 as const,
+    };
+}
+
 function parseWordleButton(customId: string): ParsedWordleButton | undefined {
     const [scope, action, printDate, userId, extraPart] = customId.split(":");
 
@@ -200,9 +230,10 @@ export async function updatePublicWordlePanel(
 
     try {
         return await session.panelMessage.edit({
-            content: createPublicPanelContent(interaction.user.id),
-            embeds: [createPanel(interaction, game)],
-            components: [createPublicWordlePanelButtons(game, interaction.user.id)],
+            content: null,
+            embeds: [],
+            components: [createPublicPanel(interaction, game)],
+            flags: MessageFlags.IsComponentsV2,
             allowedMentions: { users: [interaction.user.id] },
         });
     } catch (error) {
@@ -219,14 +250,14 @@ export async function updatePublicWordlePanel(
     }
 }
 
-function createProgressResponse(game: WordleGame): string {
+function createProgressResponse(game: WordleGame): string | undefined {
     switch (game.status) {
         case "won":
             return `정답입니다! ${game.guesses.length}/${WORDLE_MAX_GUESSES}회 만에 성공했습니다.`;
         case "lost":
             return `게임이 종료되었습니다. 정답은 **${game.puzzle.solution.toUpperCase()}**였습니다.`;
         case "playing":
-            return `${game.guesses.length}/${WORDLE_MAX_GUESSES}회차 입력을 반영했습니다.`;
+            return undefined;
     }
 }
 
@@ -267,14 +298,13 @@ async function deletePreviousPrivateResponse(
 export async function showPrivateWordleState(
     interaction: WordleInteraction,
     session: WordleSession,
-    content: string,
+    content?: string,
+    store: WordleSessionStore = sessionStore,
 ): Promise<void> {
     await deletePreviousPrivateResponse(session, interaction);
 
     const response = {
-        content,
-        embeds: [createPrivateWordlePanel(session.game)],
-        components: createWordleResultComponents(session, interaction.user.id),
+        components: [createPrivatePanel(session, interaction.user.id, content)],
     };
     let privateResponseMessage: Message;
 
@@ -282,14 +312,17 @@ export async function showPrivateWordleState(
         await interaction.deleteReply();
         privateResponseMessage = await interaction.followUp({
             ...response,
-            flags: MessageFlags.Ephemeral,
+            flags: MessageFlags.Ephemeral | MessageFlags.IsComponentsV2,
         });
     } else {
-        await interaction.reply({ ...response, flags: MessageFlags.Ephemeral });
+        await interaction.reply({
+            ...response,
+            flags: MessageFlags.Ephemeral | MessageFlags.IsComponentsV2,
+        });
         privateResponseMessage = await interaction.fetchReply();
     }
 
-    sessionStore.set(interaction.user.id, session.game.puzzle.printDate, {
+    store.set(interaction.user.id, session.game.puzzle.printDate, {
         ...session,
         privateResponseInteraction: interaction,
         privateResponseMessageId: privateResponseMessage.id,
@@ -319,7 +352,7 @@ async function processGuess(
             "사전에 등록된 5글자 영단어가 아닙니다. 입력 횟수는 차감되지 않았습니다.";
 
         if (currentSession === undefined) {
-            await interaction.editReply({ content: invalidWordMessage });
+            await interaction.editReply(createNoticeEditResponse(invalidWordMessage));
         } else {
             await showPrivateWordleState(interaction, currentSession, invalidWordMessage);
         }
@@ -349,18 +382,18 @@ async function handleShareButton(
     interaction: ButtonInteraction,
     parsedButton: ParsedWordleButton,
     session: WordleSession,
+    store: WordleSessionStore,
 ): Promise<void> {
     if (session.game.status !== "won") {
-        await interaction.reply({
-            content: "정답을 맞힌 뒤 결과를 공유할 수 있습니다.",
-            flags: MessageFlags.Ephemeral,
-        });
+        await interaction.reply(
+            createEphemeralNoticeResponse("정답을 맞힌 뒤 결과를 공유할 수 있습니다."),
+        );
         return;
     }
 
     await interaction.deferUpdate();
     await userLock.runExclusive(parsedButton.userId, async () => {
-        const latestSession = sessionStore.get(parsedButton.userId, parsedButton.printDate);
+        const latestSession = store.get(parsedButton.userId, parsedButton.printDate);
 
         if (latestSession === undefined) {
             return;
@@ -368,7 +401,13 @@ async function handleShareButton(
 
         if (latestSession.resultShared) {
             await interaction.editReply({
-                components: createWordleResultComponents(latestSession, parsedButton.userId),
+                components: [
+                    createPrivatePanel(
+                        latestSession,
+                        parsedButton.userId,
+                        createCompletedResponse(latestSession),
+                    ),
+                ],
             });
             return;
         }
@@ -381,10 +420,16 @@ async function handleShareButton(
             privateResponseMessageId: interaction.message.id,
             resultShared: true,
         };
-        sessionStore.set(parsedButton.userId, parsedButton.printDate, sharedSession);
+        store.set(parsedButton.userId, parsedButton.printDate, sharedSession);
 
         await interaction.editReply({
-            components: createWordleResultComponents(sharedSession, parsedButton.userId),
+            components: [
+                createPrivatePanel(
+                    sharedSession,
+                    parsedButton.userId,
+                    createCompletedResponse(sharedSession),
+                ),
+            ],
         });
     });
 }
@@ -404,46 +449,65 @@ export async function handleSpoilerButton(
     }
 
     await channel.send({
-        content: [
-            `<@${user.id}>님의 스포일러`,
-            `# ${[...session.game.puzzle.solution.toUpperCase()].join(" ")}`,
-        ].join("\n"),
+        components: [createWordleSpoilerContainer(session.game, user.id)],
+        flags: MessageFlags.IsComponentsV2,
         allowedMentions: { users: [user.id] },
     });
 }
 
-export async function handleWordleButton(interaction: ButtonInteraction): Promise<void> {
+export async function handleWordleButton(
+    interaction: ButtonInteraction,
+    store: WordleSessionStore = sessionStore,
+): Promise<void> {
     const parsedButton = parseWordleButton(interaction.customId);
 
     if (parsedButton === undefined) {
         return;
     }
 
-    if (interaction.user.id !== parsedButton.userId) {
-        await interaction.reply({
-            content: "이 Wordle 결과의 버튼은 게임을 진행한 사용자만 사용할 수 있습니다.",
-            flags: MessageFlags.Ephemeral,
-        });
+    if (parsedButton.action === "view") {
+        const viewerSession = store.get(interaction.user.id, parsedButton.printDate);
+
+        if (viewerSession === undefined) {
+            await interaction.reply(
+                createEphemeralNoticeResponse(
+                    "해당 날짜의 Wordle 게임을 먼저 시작한 뒤 이용해 주세요.",
+                ),
+            );
+            return;
+        }
+
+        await showPrivateWordleState(
+            interaction,
+            viewerSession,
+            "현재 Wordle 진행 상황입니다.",
+            store,
+        );
         return;
     }
 
-    const session = sessionStore.get(parsedButton.userId, parsedButton.printDate);
+    if (interaction.user.id !== parsedButton.userId) {
+        await interaction.reply(
+            createEphemeralNoticeResponse(
+                "이 Wordle 결과의 버튼은 게임을 진행한 사용자만 사용할 수 있습니다.",
+            ),
+        );
+        return;
+    }
+
+    const session = store.get(parsedButton.userId, parsedButton.printDate);
 
     if (session === undefined) {
-        await interaction.reply({
-            content: "Wordle 게임 정보를 찾을 수 없습니다. 봇이 재시작되었을 수 있습니다.",
-            flags: MessageFlags.Ephemeral,
-        });
-        return;
-    }
-
-    if (parsedButton.action === "view") {
-        await showPrivateWordleState(interaction, session, "현재 Wordle 진행 상황입니다.");
+        await interaction.reply(
+            createEphemeralNoticeResponse(
+                "Wordle 게임 정보를 찾을 수 없습니다. 봇이 재시작되었을 수 있습니다.",
+            ),
+        );
         return;
     }
 
     if (parsedButton.action === "share") {
-        await handleShareButton(interaction, parsedButton, session);
+        await handleShareButton(interaction, parsedButton, session, store);
         return;
     }
 
@@ -456,7 +520,9 @@ async function executeWordle(interaction: ChatInputCommandInteraction): Promise<
     const guess = normalizeGuess(interaction.options.getString("키워드", true));
 
     if (guess === undefined) {
-        await interaction.editReply({ content: "영문 알파벳 5글자만 입력할 수 있습니다." });
+        await interaction.editReply(
+            createNoticeEditResponse("영문 알파벳 5글자만 입력할 수 있습니다."),
+        );
         return;
     }
 
@@ -468,17 +534,19 @@ async function executeWordle(interaction: ChatInputCommandInteraction): Promise<
     } catch (error) {
         if (error instanceof NytWordleServiceError) {
             console.error("오늘의 NYT Wordle을 불러오지 못했습니다.", error);
-            await interaction.editReply({
-                content: "오늘의 NYT Wordle을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.",
-            });
+            await interaction.editReply(
+                createNoticeEditResponse(
+                    "오늘의 NYT Wordle을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.",
+                ),
+            );
             return;
         }
 
         if (error instanceof DictionaryServiceError) {
             console.error("Wordle 입력 단어를 사전에서 확인하지 못했습니다.", error);
-            await interaction.editReply({
-                content: "영어 사전에 있는 단어를 입력하세요.",
-            });
+            await interaction.editReply(
+                createNoticeEditResponse("영어 사전에 있는 단어를 입력하세요."),
+            );
             return;
         }
 

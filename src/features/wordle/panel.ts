@@ -1,4 +1,11 @@
-import { Colors, EmbedBuilder } from "discord.js";
+import {
+    ContainerBuilder,
+    SectionBuilder,
+    SeparatorBuilder,
+    TextDisplayBuilder,
+    ThumbnailBuilder,
+} from "@discordjs/builders";
+import { Colors, SeparatorSpacingSize } from "discord.js";
 
 import { WORDLE_MAX_GUESSES } from "./game.js";
 import type { GameStatus, TileState, WordleGame } from "./game.js";
@@ -40,7 +47,7 @@ function getStatusText(game: WordleGame): string {
     }
 }
 
-function getEmbedColor(status: GameStatus): number {
+function getPanelColor(status: GameStatus): number {
     switch (status) {
         case "won":
             return Colors.Green;
@@ -51,27 +58,72 @@ function getEmbedColor(status: GameStatus): number {
     }
 }
 
-export function createWordlePanel(game: WordleGame, avatarUrl?: string): EmbedBuilder {
+function createSeparator(): SeparatorBuilder {
+    return new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small);
+}
+
+export function createPublicWordleContainer(
+    game: WordleGame,
+    userId: string,
+    avatarUrl?: string,
+): ContainerBuilder {
     const rows = game.guesses.map((guess) => guess.tiles.map((tile) => TILE_EMOJI[tile]).join(""));
 
     while (rows.length < WORDLE_MAX_GUESSES) {
         rows.push(EMPTY_ROW);
     }
 
-    const panel = new EmbedBuilder()
-        .setColor(getEmbedColor(game.status))
-        .setTitle(`Wordle #${game.puzzle.puzzleNumber}`)
-        .setDescription(rows.join("\n"))
-        .addFields({ name: "상태", value: getStatusText(game), inline: true })
-        .setFooter({
-            text: `${game.puzzle.printDate} · 입력한 단어는 공개되지 않습니다.`,
-        });
+    const title = new TextDisplayBuilder().setContent(
+        `### <@${userId}>님의 Wordle #${game.puzzle.puzzleNumber}`,
+    );
+    const gameContent = new TextDisplayBuilder().setContent(
+        [rows.join("\n"), "", "### 상태", getStatusText(game), `-# ${game.puzzle.printDate}`].join(
+            "\n",
+        ),
+    );
+    const container = new ContainerBuilder()
+        .setAccentColor(getPanelColor(game.status))
+        .addTextDisplayComponents(title)
+        .addSeparatorComponents(createSeparator());
 
     if (avatarUrl !== undefined) {
-        panel.setThumbnail(avatarUrl);
+        container.addSectionComponents(
+            new SectionBuilder()
+                .addTextDisplayComponents(gameContent)
+                .setThumbnailAccessory(
+                    new ThumbnailBuilder()
+                        .setURL(avatarUrl)
+                        .setDescription(`<@${userId}>님의 프로필 이미지`),
+                ),
+        );
+    } else {
+        container.addTextDisplayComponents(gameContent);
     }
 
-    return panel;
+    return container;
+}
+
+export function createWordleSpoilerContainer(game: WordleGame, userId: string): ContainerBuilder {
+    return new ContainerBuilder()
+        .setAccentColor(Colors.Red)
+        .addTextDisplayComponents(
+            new TextDisplayBuilder().setContent(`### <@${userId}>님의 스포일러`),
+        )
+        .addSeparatorComponents(createSeparator())
+        .addTextDisplayComponents(
+            new TextDisplayBuilder().setContent(
+                [
+                    `# ${[...game.puzzle.solution.toUpperCase()].join(" ")}`,
+                    `-# Wordle #${game.puzzle.puzzleNumber} · ${game.puzzle.printDate}`,
+                ].join("\n"),
+            ),
+        );
+}
+
+export function createWordleNoticeContainer(content: string): ContainerBuilder {
+    return new ContainerBuilder()
+        .setAccentColor(Colors.Yellow)
+        .addTextDisplayComponents(new TextDisplayBuilder().setContent(content));
 }
 
 function createGuessHistory(game: WordleGame): string {
@@ -132,18 +184,31 @@ function createAlphabetTiles(game: WordleGame): string {
     return lines.join("\n");
 }
 
-export function createPrivateWordlePanel(game: WordleGame): EmbedBuilder {
-    return new EmbedBuilder()
-        .setColor(getEmbedColor(game.status))
-        .setTitle(`나의 Wordle #${game.puzzle.puzzleNumber}`)
-        .setDescription(
-            [
-                "**입력 기록**",
-                createGuessHistory(game),
-                "**알파벳**",
-                createAlphabetTiles(game),
-            ].join("\n"),
+export function createPrivateWordleContainer(game: WordleGame, notice?: string): ContainerBuilder {
+    const container = new ContainerBuilder().setAccentColor(getPanelColor(game.status));
+
+    if (notice !== undefined) {
+        container
+            .addTextDisplayComponents(new TextDisplayBuilder().setContent(notice))
+            .addSeparatorComponents(createSeparator());
+    }
+
+    return container
+        .addTextDisplayComponents(
+            new TextDisplayBuilder().setContent(
+                [
+                    `### 나의 Wordle #${game.puzzle.puzzleNumber}`,
+                    "",
+                    "**입력 기록**",
+                    createGuessHistory(game),
+                    "",
+                    "**알파벳**",
+                    createAlphabetTiles(game),
+                    "",
+                    "### 상태",
+                    getStatusText(game),
+                ].join("\n"),
+            ),
         )
-        .addFields({ name: "상태", value: getStatusText(game), inline: true })
-        .setFooter({ text: "이 화면은 게임을 진행한 사용자에게만 표시됩니다." });
+        .addSeparatorComponents(createSeparator());
 }
