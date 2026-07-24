@@ -1,5 +1,3 @@
-import "dotenv/config";
-
 import { z } from "zod";
 
 const snowflake = z.string().regex(/^\d{17,20}$/, "Discord ID 형식이 올바르지 않습니다.");

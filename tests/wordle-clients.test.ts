@@ -79,6 +79,7 @@ describe("로컬 영어 사전", () => {
 
         expect(dictionary.isEnglishWord("crane")).toBe(true);
         expect(dictionary.isEnglishWord("apple")).toBe(true);
+        expect(dictionary.isEnglishWord("aapas")).toBe(true);
     });
 
     it("로컬 단어 목록에 없는 입력을 거부합니다", () => {
