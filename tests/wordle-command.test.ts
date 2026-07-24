@@ -568,7 +568,7 @@ describe("Wordle 결과 버튼", () => {
         });
     });
 
-    it("진행 중이거나 이미 공유한 게임에서는 결과 공유 버튼을 비활성화합니다", () => {
+    it("진행 중이거나 같은 내 게임 화면에서 이미 공유한 경우 버튼을 비활성화합니다", () => {
         const panelMessage = {
             url: "https://discord.com/channels/guild/channel/message",
         } as Message;
@@ -610,7 +610,7 @@ describe("Wordle 결과 버튼", () => {
         expect(actionRow?.components).toHaveLength(1);
     });
 
-    it("실패 결과를 채널에 공유하고 공유 버튼을 비활성화합니다", async () => {
+    it("같은 내 게임 화면의 실패 결과는 한 번만 공유합니다", async () => {
         const userId = "62345678901234567";
         const store = new WordleSessionStore();
         const session: WordleSession = {
@@ -653,6 +653,7 @@ describe("Wordle 결과 버튼", () => {
         store.set(userId, puzzle.printDate, guildId, session);
 
         await handleWordleButton(interaction, store);
+        await handleWordleButton(interaction, store);
 
         expect(send).toHaveBeenCalledOnce();
         expect(store.get(userId, puzzle.printDate, guildId)).toMatchObject({
@@ -671,6 +672,44 @@ describe("Wordle 결과 버튼", () => {
         expect(JSON.stringify(privateResponse.components[0]?.toJSON())).toContain(
             '"disabled":true',
         );
+    });
+
+    it("새 내 게임 화면을 열면 결과 공유 횟수를 초기화합니다", async () => {
+        const userId = "64345678901234567";
+        const store = new WordleSessionStore();
+        const session: WordleSession = {
+            game: createLostGame(),
+            panelMessage: undefined,
+            privateResponseInteraction: undefined,
+            privateResponseMessageId: undefined,
+            resultShared: true,
+        };
+        const editReply = vi.fn().mockResolvedValue({
+            id: "reopened-private-message",
+        });
+        const interaction = {
+            id: "reopen-wordle-command",
+            deferred: true,
+            editReply,
+            guildId,
+            user: {
+                id: userId,
+                displayAvatarURL: () => "https://cdn.example.com/avatar.png",
+            },
+        } as unknown as ChatInputCommandInteraction;
+        store.set(userId, puzzle.printDate, guildId, session);
+
+        await startWordleGame(interaction, createWordleGame(puzzle), store);
+
+        expect(store.get(userId, puzzle.printDate, guildId)?.resultShared).toBe(false);
+
+        const privateResponse = editReply.mock.calls[0]?.[0] as {
+            components: { toJSON(): unknown }[];
+        };
+        const serializedResponse = JSON.stringify(privateResponse.components[0]?.toJSON());
+
+        expect(serializedResponse).toContain('"label":"결과 공유"');
+        expect(serializedResponse).toContain('"disabled":false');
     });
 
     it("Wordle 버튼 식별자는 날짜와 사용자 ID 형식을 검증합니다", () => {

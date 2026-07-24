@@ -402,10 +402,14 @@ export async function showPrivateWordleState(
     const guildId = getWordleGuildId(interaction);
     await deletePreviousPrivateResponse(session, interaction);
 
+    const privateSession: WordleSession = {
+        ...session,
+        resultShared: false,
+    };
     const response = {
         content: null,
         embeds: [],
-        components: [createPrivatePanel(session, interaction.user.id, content)],
+        components: [createPrivatePanel(privateSession, interaction.user.id, content)],
         flags: MessageFlags.IsComponentsV2 as const,
     };
     let privateResponseMessage: Message;
@@ -420,8 +424,8 @@ export async function showPrivateWordleState(
         privateResponseMessage = await interaction.fetchReply();
     }
 
-    store.set(interaction.user.id, session.game.puzzle.printDate, guildId, {
-        ...session,
+    store.set(interaction.user.id, privateSession.game.puzzle.printDate, guildId, {
+        ...privateSession,
         privateResponseInteraction: interaction,
         privateResponseMessageId: privateResponseMessage.id,
     });
@@ -582,13 +586,15 @@ async function submitWordleCommandGuess(
 ): Promise<void> {
     const guildId = getWordleGuildId(interaction);
     const existingSession = store.get(interaction.user.id, game.puzzle.printDate, guildId);
-    const session = existingSession ?? createNewWordleSession(game);
+    const session: WordleSession = {
+        ...(existingSession ?? createNewWordleSession(game)),
+        resultShared: false,
+    };
 
-    if (existingSession === undefined) {
-        store.set(interaction.user.id, game.puzzle.printDate, guildId, session);
-    } else {
+    if (existingSession !== undefined) {
         await deletePreviousPrivateResponse(existingSession, interaction);
     }
+    store.set(interaction.user.id, game.puzzle.printDate, guildId, session);
 
     const guess = normalizeGuess(rawGuess);
 
