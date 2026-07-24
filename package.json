@@ -6,10 +6,11 @@
     "type": "module",
     "packageManager": "npm@11.12.1",
     "scripts": {
-        "dev": "tsx watch src/index.ts",
+        "dev": "tsx watch --env-file=.env.development src/index.ts",
         "build": "tsc",
-        "start": "node dist/index.js",
-        "deploy:commands": "tsx src/deploy-commands.ts",
+        "start": "node --env-file=.env dist/index.js",
+        "deploy:commands": "tsx --env-file=.env src/deploy-commands.ts",
+        "deploy:commands:dev": "tsx --env-file=.env.development src/deploy-commands.ts",
         "lint": "eslint .",
         "format": "prettier --write .",
         "format:check": "prettier --check .",
@@ -19,11 +20,11 @@
         "check": "npm run lint && npm run format:check && npm run typecheck && npm run test"
     },
     "engines": {
-        "node": ">=22.0.0"
+        "node": ">=22.5.0"
     },
     "dependencies": {
+        "@discordjs/builders": "^1.14.1",
         "discord.js": "^14.27.0",
-        "dotenv": "^17.4.2",
         "zod": "^4.4.3"
     },
     "devDependencies": {

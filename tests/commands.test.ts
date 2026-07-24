@@ -20,7 +20,7 @@ describe("슬래시 명령어 정의", () => {
     });
 
     it("테스트 명령어는 다섯 선택지가 있는 필수 옵션을 사용합니다", () => {
-        const [command] = commands;
+        const command = commands.find((candidate) => candidate.data.name === "테스트");
 
         expect(command).toBeDefined();
 
@@ -46,5 +46,28 @@ describe("슬래시 명령어 정의", () => {
                 ],
             },
         ]);
+    });
+
+    it("Wordle 명령어는 선택적인 5글자 단어 옵션을 사용합니다", () => {
+        const command = commands.find((candidate) => candidate.data.name === "워들");
+
+        expect(command).toBeDefined();
+
+        if (command === undefined) {
+            throw new Error("Wordle 명령어가 등록되지 않았습니다.");
+        }
+
+        const commandData = command.data.toJSON();
+
+        expect(commandData.options).toHaveLength(1);
+        expect(commandData.options?.[0]).toMatchObject({
+            type: ApplicationCommandOptionType.String,
+            name: "단어",
+            description: "모달을 열지 않고 바로 제출할 5글자 영단어",
+            required: false,
+            min_length: 5,
+            max_length: 5,
+        });
+        expect(commandData.dm_permission).toBe(false);
     });
 });
