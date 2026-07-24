@@ -9,14 +9,17 @@ import type {
 
 import { commands } from "../commands/index.js";
 import {
+    createWordleCommand,
     handleWordleButton,
     handleWordleModal,
     isWordleButton,
     isWordleModal,
+    wordleCommand,
 } from "../commands/wordle.js";
+import type { WordleSessionStore } from "../features/wordle/session-store.js";
 import type { BotCommand } from "../types/command.js";
 
-export function createClient(): Client {
+export function createClient(wordleSessionStore?: WordleSessionStore): Client {
     const client = new Client({ intents: [GatewayIntentBits.Guilds] });
     const commandMap = new Collection<string, BotCommand>();
 
@@ -28,6 +31,10 @@ export function createClient(): Client {
         }
 
         commandMap.set(commandName, command);
+    }
+
+    if (wordleSessionStore !== undefined) {
+        commandMap.set(wordleCommand.data.name, createWordleCommand(wordleSessionStore));
     }
 
     client.once(Events.ClientReady, (readyClient) => {
@@ -56,7 +63,7 @@ export function createClient(): Client {
         }
 
         try {
-            await handleWordleButton(interaction);
+            await handleWordleButton(interaction, wordleSessionStore);
         } catch (error) {
             console.error(`버튼 처리 실패: ${interaction.customId}`, error);
             await sendErrorResponse(interaction);
@@ -71,7 +78,7 @@ export function createClient(): Client {
         }
 
         try {
-            await handleWordleModal(interaction);
+            await handleWordleModal(interaction, wordleSessionStore);
         } catch (error) {
             console.error(`모달 처리 실패: ${interaction.customId}`, error);
             await sendErrorResponse(interaction);

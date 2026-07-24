@@ -858,7 +858,10 @@ export async function handleWordleModal(
     );
 }
 
-async function executeWordle(interaction: ChatInputCommandInteraction): Promise<void> {
+async function executeWordle(
+    interaction: ChatInputCommandInteraction,
+    store: WordleSessionStore,
+): Promise<void> {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const rawGuess = interaction.options.getString(WORDLE_GUESS_OPTION_NAME);
 
@@ -867,7 +870,7 @@ async function executeWordle(interaction: ChatInputCommandInteraction): Promise<
         const game = createWordleGame(puzzle);
         await userLock.runExclusive(interaction.user.id, async () => {
             if (rawGuess === null) {
-                await startWordleGame(interaction, game, sessionStore);
+                await startWordleGame(interaction, game, store);
                 return;
             }
 
@@ -875,7 +878,7 @@ async function executeWordle(interaction: ChatInputCommandInteraction): Promise<
                 interaction,
                 game,
                 rawGuess,
-                sessionStore,
+                store,
                 dictionaryClient,
             );
         });
@@ -894,7 +897,11 @@ async function executeWordle(interaction: ChatInputCommandInteraction): Promise<
     }
 }
 
-export const wordleCommand: BotCommand = {
-    data,
-    execute: executeWordle,
-};
+export function createWordleCommand(store: WordleSessionStore): BotCommand {
+    return {
+        data,
+        execute: (interaction) => executeWordle(interaction, store),
+    };
+}
+
+export const wordleCommand = createWordleCommand(sessionStore);

@@ -11,6 +11,7 @@ const envSchema = z.object({
         (value) => (value === "" ? undefined : value),
         snowflake.optional(),
     ),
+    WORDLE_DATABASE_PATH: z.string().trim().min(1).default("data/wordle.sqlite"),
 });
 
 const parsedEnv = envSchema.safeParse(process.env);
@@ -25,4 +26,5 @@ export const env = {
     discordToken: parsedEnv.data.DISCORD_TOKEN,
     discordClientId: parsedEnv.data.DISCORD_CLIENT_ID,
     discordGuildId: parsedEnv.data.DISCORD_GUILD_ID,
+    wordleDatabasePath: parsedEnv.data.WORDLE_DATABASE_PATH,
 };

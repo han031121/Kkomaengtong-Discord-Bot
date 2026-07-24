@@ -24,6 +24,7 @@ TypeScript와 discord.js로 만든 간단한 Discord 슬래시 명령어 봇입�
     - 비공개 화면에서 색상 추측 기록과 알파벳순 글자 상태를 표시하고 단어 제출 시 같은 화면 수정
     - 성공과 실패 결과 모두 공유할 수 있으며 성공 결과에만 스포하기 버튼 제공
     - 결과 공유는 `내 게임` 비공개 화면마다 한 번만 가능하며 새 화면을 열면 다시 공유 가능
+    - 사용자별 날짜별 게임 진행 사항을 SQLite에 저장하여 봇 재시작 후에도 복원
     - NYT Wordle 날짜별 엔드포인트에서 서울 기준 오늘의 퍼즐을 조회
     - Free Dictionary API에서 입력 단어를 검증하며 잘못된 단어는 횟수에서 제외
 - 환경 변수 유효성 검사
@@ -32,7 +33,7 @@ TypeScript와 discord.js로 만든 간단한 Discord 슬래시 명령어 봇입�
 
 ## 준비 사항
 
-- Node.js 22 이상
+- Node.js 22.5 이상
 - npm 11 이상
 - Discord 계정 및 테스트용 Discord 서버
 - NYT Wordle과 Free Dictionary API에 접속할 수 있는 네트워크 환경
@@ -59,9 +60,11 @@ TypeScript와 discord.js로 만든 간단한 Discord 슬래시 명령어 봇입�
     DISCORD_TOKEN=봇-토큰
     DISCORD_CLIENT_ID=애플리케이션-ID
     DISCORD_GUILD_ID=개발용-서버-ID
+    WORDLE_DATABASE_PATH=data/wordle.sqlite
     ```
 
     `DISCORD_GUILD_ID`는 선택 사항입니다. 개발 중에는 서버 ID를 지정하는 편이 명령어가 즉시 반영되어 편리합니다. 비워 두면 전역 명령어로 등록됩니다.
+    `WORDLE_DATABASE_PATH`도 선택 사항이며 기본값은 `data/wordle.sqlite`입니다. 지정한 상위 디렉터리가 없으면 봇 시작 시 자동으로 생성합니다.
 
 5. Developer Portal의 OAuth2 URL 생성기에서 `bot`과 `applications.commands` 범위를 선택하여 봇을 서버에 초대합니다. 현재 예제 명령어에는 별도의 관리자 권한이 필요하지 않습니다.
 
@@ -100,7 +103,7 @@ TypeScript와 discord.js로 만든 간단한 Discord 슬래시 명령어 봇입�
 
 새 테스트 기능은 `src/commands/test.ts`의 명령어 옵션 선택지와 응답 생성 로직에 함께 추가합니다.
 
-Wordle 진행 상태는 사용자와 퍼즐 날짜별로 봇 프로세스 메모리에 저장되며, 공개 패널과 비공개 응답 위치는 서버별로 관리됩니다. 따라서 봇을 재시작하면 기존 게임 버튼을 사용할 수 없으며 `/워들`로 새 게임을 시작해야 합니다. NYT와 사전 응답은 같은 날짜 또는 단어에 대해 프로세스가 실행되는 동안 캐시됩니다.
+Wordle 진행 상태는 사용자와 퍼즐 날짜별로 SQLite에 저장되므로 봇을 재시작해도 `/워들` 명령이나 기존 버튼을 통해 이어서 진행할 수 있습니다. Discord 공개 패널과 비공개 응답 객체는 서버별 런타임 상태이므로 재시작 후 다시 생성될 수 있습니다. NYT와 사전 응답은 같은 날짜 또는 단어에 대해 프로세스가 실행되는 동안 캐시됩니다.
 
 ## 개발 명령어
 
