@@ -22,9 +22,9 @@ import {
     updatePublicWordlePanel,
     wordleCommand,
 } from "../src/commands/wordle.js";
-import { DictionaryClient } from "../src/features/wordle/dictionary-client.js";
 import { createWordleGame, submitGuess } from "../src/features/wordle/game.js";
 import type { WordlePuzzle } from "../src/features/wordle/game.js";
+import { LocalDictionary } from "../src/features/wordle/local-dictionary.js";
 import { NytWordleClient } from "../src/features/wordle/nyt-wordle-client.js";
 import { WordleSessionStore } from "../src/features/wordle/session-store.js";
 import type { WordleSession } from "../src/features/wordle/session-store.js";
@@ -154,8 +154,8 @@ describe("Wordle 공개 메시지 전송", () => {
             .spyOn(NytWordleClient.prototype, "getTodaysPuzzle")
             .mockResolvedValue(puzzle);
         const dictionaryRequest = vi
-            .spyOn(DictionaryClient.prototype, "isEnglishWord")
-            .mockResolvedValue(true);
+            .spyOn(LocalDictionary.prototype, "isEnglishWord")
+            .mockReturnValue(true);
 
         try {
             await wordleCommand.execute(interaction);
@@ -432,7 +432,7 @@ describe("Wordle 서버별 진행 상태", () => {
             },
         } as unknown as ModalSubmitInteraction;
         const dictionary = {
-            isEnglishWord: vi.fn().mockResolvedValue(true),
+            isEnglishWord: vi.fn().mockReturnValue(true),
         };
 
         await handleWordleModal(interaction, store, dictionary);
@@ -933,7 +933,7 @@ describe("Wordle 비공개 화면", () => {
 });
 
 describe("Wordle 모달 입력", () => {
-    it("사전에 없는 단어는 횟수를 차감하지 않고 입력 버튼이 있는 화면으로 돌아갑니다", async () => {
+    it("로컬 목록에 없는 단어는 횟수를 차감하지 않고 입력 버튼이 있는 화면으로 돌아갑니다", async () => {
         const userId = "12345678901234567";
         const store = new WordleSessionStore();
         const session: WordleSession = {
@@ -961,7 +961,7 @@ describe("Wordle 모달 입력", () => {
             },
         } as unknown as ModalSubmitInteraction;
         const dictionary = {
-            isEnglishWord: vi.fn().mockResolvedValue(false),
+            isEnglishWord: vi.fn().mockReturnValue(false),
         };
 
         store.set(userId, puzzle.printDate, guildId, session);
@@ -980,7 +980,7 @@ describe("Wordle 모달 입력", () => {
         const serializedResponse = JSON.stringify(response.components[0]?.toJSON());
 
         expect(response.flags).toBe(32_768);
-        expect(serializedResponse).toContain("사전에 등록된 5글자 영단어가 아닙니다.");
+        expect(serializedResponse).toContain("등록된 5글자 영단어가 아닙니다.");
         expect(serializedResponse).toContain("단어 입력");
     });
 
@@ -1013,7 +1013,7 @@ describe("Wordle 모달 입력", () => {
             },
         } as unknown as ModalSubmitInteraction;
         const dictionary = {
-            isEnglishWord: vi.fn().mockResolvedValue(true),
+            isEnglishWord: vi.fn().mockReturnValue(true),
         };
 
         store.set(userId, puzzle.printDate, guildId, session);
@@ -1063,7 +1063,7 @@ describe("Wordle 모달 입력", () => {
             },
         } as unknown as ModalSubmitInteraction;
         const dictionary = {
-            isEnglishWord: vi.fn().mockResolvedValue(true),
+            isEnglishWord: vi.fn().mockReturnValue(true),
         };
 
         store.set(userId, puzzle.printDate, guildId, session);

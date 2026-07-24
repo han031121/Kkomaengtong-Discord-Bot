@@ -1,9 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import {
-    DictionaryClient,
-    DictionaryServiceError,
-} from "../src/features/wordle/dictionary-client.js";
+import { LocalDictionary } from "../src/features/wordle/local-dictionary.js";
 import {
     formatDateInTimeZone,
     NytWordleClient,
@@ -76,34 +73,18 @@ describe("NYT Wordle 클라이언트", () => {
     });
 });
 
-describe("영어 사전 클라이언트", () => {
-    it("사전에 있는 단어를 확인하고 결과를 캐시합니다", async () => {
-        const fetchMock = vi
-            .fn<typeof fetch>()
-            .mockResolvedValue(new Response(JSON.stringify([{ word: "crane" }]), { status: 200 }));
-        const client = new DictionaryClient(fetchMock);
+describe("로컬 영어 사전", () => {
+    it("로컬 단어 목록에 있는 5글자 영단어를 확인합니다", () => {
+        const dictionary = new LocalDictionary();
 
-        await expect(client.isEnglishWord("crane")).resolves.toBe(true);
-        await expect(client.isEnglishWord("crane")).resolves.toBe(true);
-
-        expect(fetchMock).toHaveBeenCalledTimes(1);
+        expect(dictionary.isEnglishWord("crane")).toBe(true);
+        expect(dictionary.isEnglishWord("apple")).toBe(true);
     });
 
-    it("사전의 404 응답은 존재하지 않는 단어로 처리합니다", async () => {
-        const fetchMock = vi
-            .fn<typeof fetch>()
-            .mockResolvedValue(new Response(null, { status: 404 }));
-        const client = new DictionaryClient(fetchMock);
+    it("로컬 단어 목록에 없는 입력을 거부합니다", () => {
+        const dictionary = new LocalDictionary();
 
-        await expect(client.isEnglishWord("zzzzz")).resolves.toBe(false);
-    });
-
-    it("사전 장애를 존재하지 않는 단어로 오인하지 않습니다", async () => {
-        const fetchMock = vi
-            .fn<typeof fetch>()
-            .mockResolvedValue(new Response(null, { status: 503 }));
-        const client = new DictionaryClient(fetchMock);
-
-        await expect(client.isEnglishWord("crane")).rejects.toBeInstanceOf(DictionaryServiceError);
+        expect(dictionary.isEnglishWord("zzzzz")).toBe(false);
+        expect(dictionary.isEnglishWord("cranes")).toBe(false);
     });
 });

@@ -15,7 +15,6 @@ import type {
 import { LabelBuilder, ModalBuilder, TextInputBuilder } from "@discordjs/builders";
 
 import { AsyncKeyedLock } from "../features/wordle/async-keyed-lock.js";
-import { DictionaryClient, DictionaryServiceError } from "../features/wordle/dictionary-client.js";
 import {
     createWordleGame,
     normalizeGuess,
@@ -23,6 +22,7 @@ import {
     WORDLE_MAX_GUESSES,
 } from "../features/wordle/game.js";
 import type { WordleGame } from "../features/wordle/game.js";
+import { LocalDictionary } from "../features/wordle/local-dictionary.js";
 import { NytWordleClient, NytWordleServiceError } from "../features/wordle/nyt-wordle-client.js";
 import {
     createPrivateWordleContainer,
@@ -34,7 +34,7 @@ import { WordleSessionStore } from "../features/wordle/session-store.js";
 import type { WordleSession } from "../features/wordle/session-store.js";
 import type { BotCommand } from "../types/command.js";
 
-const dictionaryClient = new DictionaryClient();
+const localDictionary = new LocalDictionary();
 const nytWordleClient = new NytWordleClient();
 const sessionStore = new WordleSessionStore();
 const userLock = new AsyncKeyedLock();
@@ -56,7 +56,7 @@ const WORDLE_GUESS_OPTION_NAME = "단어";
 type WordleInteraction = ChatInputCommandInteraction | ButtonInteraction | ModalSubmitInteraction;
 type WordleGuessInteraction = ChatInputCommandInteraction | ModalSubmitInteraction;
 type WordleButtonAction = "share" | "spoiler" | "input" | "progress-share";
-type WordleDictionary = Pick<DictionaryClient, "isEnglishWord">;
+type WordleDictionary = Pick<LocalDictionary, "isEnglishWord">;
 
 interface ParsedWordleButton {
     action: WordleButtonAction;
@@ -481,28 +481,9 @@ async function processGuess(
         return;
     }
 
-    let isDictionaryWord: boolean;
-
-    try {
-        isDictionaryWord = await dictionary.isEnglishWord(guess);
-    } catch (error) {
-        if (!(error instanceof DictionaryServiceError)) {
-            throw error;
-        }
-
-        console.error("Wordle 입력 단어를 사전에서 확인하지 못했습니다.", error);
-        await updatePrivateWordleState(
-            interaction,
-            currentSession,
-            "영어 사전 조회에 실패했습니다. 잠시 후 다시 시도해 주세요.",
-            store,
-        );
-        return;
-    }
-
-    if (!isDictionaryWord && guess !== currentSession.game.puzzle.solution) {
+    if (!dictionary.isEnglishWord(guess) && guess !== currentSession.game.puzzle.solution) {
         const invalidWordMessage =
-            "사전에 등록된 5글자 영단어가 아닙니다. 입력 횟수는 차감되지 않았습니다.";
+            "등록된 5글자 영단어가 아닙니다. 입력 횟수는 차감되지 않았습니다.";
 
         await updatePrivateWordleState(interaction, currentSession, invalidWordMessage, store);
         return;
@@ -809,7 +790,7 @@ export async function handleWordleButton(
 export async function handleWordleModal(
     interaction: ModalSubmitInteraction,
     store: WordleSessionStore = sessionStore,
-    dictionary: WordleDictionary = dictionaryClient,
+    dictionary: WordleDictionary = localDictionary,
 ): Promise<void> {
     const parsedModal = parseWordleModal(interaction.customId);
 
@@ -874,13 +855,7 @@ async function executeWordle(
                 return;
             }
 
-            await submitWordleCommandGuess(
-                interaction,
-                game,
-                rawGuess,
-                store,
-                dictionaryClient,
-            );
+            await submitWordleCommandGuess(interaction, game, rawGuess, store, localDictionary);
         });
     } catch (error) {
         if (error instanceof NytWordleServiceError) {
