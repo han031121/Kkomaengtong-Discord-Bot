@@ -22,9 +22,12 @@ import {
     submitGuess,
     WORDLE_MAX_GUESSES,
 } from "../features/wordle/game.js";
-import type { WordleGame } from "../features/wordle/game.js";
+import type { WordleGame, WordlePuzzle } from "../features/wordle/game.js";
 import { LocalDictionary } from "../features/wordle/local-dictionary.js";
-import { NytWordleClient, NytWordleServiceError } from "../features/wordle/nyt-wordle-client.js";
+import {
+    WordlePuzzleUnavailableError,
+    wordlePuzzleCache,
+} from "../features/wordle/puzzle-cache.js";
 import {
     createPrivateWordleContainer,
     createPublicWordleContainer,
@@ -37,7 +40,6 @@ import type { WordlePublicStatusPanel, WordleSession } from "../features/wordle/
 import type { BotCommand } from "../types/command.js";
 
 const localDictionary = new LocalDictionary();
-const nytWordleClient = new NytWordleClient();
 const sessionStore = new WordleSessionStore();
 const userLock = new AsyncKeyedLock();
 const publicStatusPanelLock = new AsyncKeyedLock();
@@ -69,6 +71,10 @@ type WordleGuessInteraction = ChatInputCommandInteraction | ModalSubmitInteracti
 type WordleButtonAction =
     "share" | "spoiler" | "input" | "progress-share" | "status-panel" | "status-view";
 type WordleDictionary = Pick<LocalDictionary, "isEnglishWord">;
+
+export interface WordlePuzzleProvider {
+    getTodaysPuzzle(now?: Date): WordlePuzzle;
+}
 
 interface ParsedWordleButton {
     action: WordleButtonAction;
@@ -1247,12 +1253,13 @@ export async function handleWordleModal(
 async function executeWordle(
     interaction: ChatInputCommandInteraction,
     store: WordleSessionStore,
+    puzzleProvider: WordlePuzzleProvider,
 ): Promise<void> {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const rawGuess = interaction.options.getString(WORDLE_GUESS_OPTION_NAME);
 
     try {
-        const puzzle = await nytWordleClient.getTodaysPuzzle();
+        const puzzle = puzzleProvider.getTodaysPuzzle();
         const game = createWordleGame(puzzle);
         await userLock.runExclusive(interaction.user.id, async () => {
             if (rawGuess === null) {
@@ -1263,11 +1270,11 @@ async function executeWordle(
             await submitWordleCommandGuess(interaction, game, rawGuess, store, localDictionary);
         });
     } catch (error) {
-        if (error instanceof NytWordleServiceError) {
-            console.error("오늘의 NYT Wordle을 불러오지 못했습니다.", error);
+        if (error instanceof WordlePuzzleUnavailableError) {
+            console.error("오늘의 NYT Wordle 캐시를 찾을 수 없습니다.", error);
             await interaction.editReply(
                 createNoticeEditResponse(
-                    "오늘의 NYT Wordle을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.",
+                    "오늘의 Wordle이 아직 준비되지 않았습니다. 봇 시작 또는 날짜 갱신 시 캐시에 실패했을 수 있습니다.",
                 ),
             );
             return;
@@ -1277,11 +1284,14 @@ async function executeWordle(
     }
 }
 
-export function createWordleCommand(store: WordleSessionStore): BotCommand {
+export function createWordleCommand(
+    store: WordleSessionStore,
+    puzzleProvider: WordlePuzzleProvider = wordlePuzzleCache,
+): BotCommand {
     return {
         data,
-        execute: (interaction) => executeWordle(interaction, store),
+        execute: (interaction) => executeWordle(interaction, store, puzzleProvider),
     };
 }
 
-export const wordleCommand = createWordleCommand(sessionStore);
+export const wordleCommand = createWordleCommand(sessionStore, wordlePuzzleCache);

@@ -16,10 +16,14 @@ import {
     isWordleModal,
     wordleCommand,
 } from "../commands/wordle.js";
+import type { WordlePuzzleProvider } from "../commands/wordle.js";
 import type { WordleSessionStore } from "../features/wordle/session-store.js";
 import type { BotCommand } from "../types/command.js";
 
-export function createClient(wordleSessionStore?: WordleSessionStore): Client {
+export function createClient(
+    wordleSessionStore?: WordleSessionStore,
+    wordlePuzzleProvider?: WordlePuzzleProvider,
+): Client {
     const client = new Client({ intents: [GatewayIntentBits.Guilds] });
     const commandMap = new Collection<string, BotCommand>();
 
@@ -34,7 +38,10 @@ export function createClient(wordleSessionStore?: WordleSessionStore): Client {
     }
 
     if (wordleSessionStore !== undefined) {
-        commandMap.set(wordleCommand.data.name, createWordleCommand(wordleSessionStore));
+        commandMap.set(
+            wordleCommand.data.name,
+            createWordleCommand(wordleSessionStore, wordlePuzzleProvider),
+        );
     }
 
     client.once(Events.ClientReady, (readyClient) => {

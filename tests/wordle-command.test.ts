@@ -7,6 +7,7 @@ import type {
 import { describe, expect, it, vi } from "vitest";
 
 import {
+    createWordleCommand,
     createWordleGuessModal,
     createWordlePlayingButtons,
     createWordleResultButtons,
@@ -25,7 +26,7 @@ import {
 import { createWordleGame, submitGuess } from "../src/features/wordle/game.js";
 import type { WordlePuzzle } from "../src/features/wordle/game.js";
 import { LocalDictionary } from "../src/features/wordle/local-dictionary.js";
-import { NytWordleClient } from "../src/features/wordle/nyt-wordle-client.js";
+import { WordlePuzzleUnavailableError } from "../src/features/wordle/puzzle-cache.js";
 import { WordleSessionStore } from "../src/features/wordle/session-store.js";
 import type { WordleSession } from "../src/features/wordle/session-store.js";
 
@@ -36,6 +37,12 @@ const puzzle: WordlePuzzle = {
     puzzleNumber: 1860,
 };
 const guildId = "22345678901234567";
+
+function createPuzzleProvider(returnedPuzzle: WordlePuzzle = puzzle) {
+    return {
+        getTodaysPuzzle: vi.fn(() => returnedPuzzle),
+    };
+}
 
 function createLostGame() {
     let game = createWordleGame(puzzle);
@@ -99,16 +106,11 @@ describe("Wordle 공개 메시지 전송", () => {
                 displayAvatarURL: () => "https://cdn.example.com/avatar.png",
             },
         } as unknown as ChatInputCommandInteraction;
-        const puzzleRequest = vi
-            .spyOn(NytWordleClient.prototype, "getTodaysPuzzle")
-            .mockResolvedValue(puzzle);
+        const puzzleProvider = createPuzzleProvider();
 
-        try {
-            await wordleCommand.execute(interaction);
-        } finally {
-            puzzleRequest.mockRestore();
-        }
+        await createWordleCommand(new WordleSessionStore(), puzzleProvider).execute(interaction);
 
+        expect(puzzleProvider.getTodaysPuzzle).toHaveBeenCalledOnce();
         expect(send).not.toHaveBeenCalled();
         expect(editReply).toHaveBeenCalledOnce();
 
@@ -151,16 +153,17 @@ describe("Wordle 공개 메시지 전송", () => {
                 displayAvatarURL: () => "https://cdn.example.com/avatar.png",
             },
         } as unknown as ChatInputCommandInteraction;
-        const puzzleRequest = vi
-            .spyOn(NytWordleClient.prototype, "getTodaysPuzzle")
-            .mockResolvedValue(puzzle);
+        const puzzleProvider = createPuzzleProvider();
         const dictionaryRequest = vi
             .spyOn(LocalDictionary.prototype, "isEnglishWord")
             .mockReturnValue(true);
 
         try {
-            await wordleCommand.execute(interaction);
+            await createWordleCommand(new WordleSessionStore(), puzzleProvider).execute(
+                interaction,
+            );
 
+            expect(puzzleProvider.getTodaysPuzzle).toHaveBeenCalledOnce();
             expect(dictionaryRequest).toHaveBeenCalledWith("crane");
             expect(editReply).toHaveBeenCalledOnce();
 
@@ -173,9 +176,50 @@ describe("Wordle 공개 메시지 전송", () => {
             expect(serializedResponse).toContain("진행 중 · 1/6");
             expect(serializedResponse).toContain("단어 입력");
         } finally {
-            puzzleRequest.mockRestore();
             dictionaryRequest.mockRestore();
         }
+    });
+
+    it("/워들 실행 시 오늘 퍼즐 캐시가 없으면 안내 메시지만 표시합니다", async () => {
+        const editReply = vi.fn().mockResolvedValue({
+            id: "unavailable-private-message",
+        });
+        let deferred = false;
+        const interaction = {
+            get deferred() {
+                return deferred;
+            },
+            deferReply: vi.fn().mockImplementation(() => {
+                deferred = true;
+                return Promise.resolve();
+            }),
+            editReply,
+            guildId,
+            options: {
+                getString: () => null,
+            },
+            user: {
+                id: "92345678901234567",
+                displayAvatarURL: () => "https://cdn.example.com/avatar.png",
+            },
+        } as unknown as ChatInputCommandInteraction;
+        const puzzleProvider = {
+            getTodaysPuzzle: vi.fn(() => {
+                throw new WordlePuzzleUnavailableError("cache miss");
+            }),
+        };
+
+        await createWordleCommand(new WordleSessionStore(), puzzleProvider).execute(interaction);
+
+        expect(puzzleProvider.getTodaysPuzzle).toHaveBeenCalledOnce();
+        expect(editReply).toHaveBeenCalledOnce();
+
+        const privateResponse = editReply.mock.calls[0]?.[0] as {
+            components: { toJSON(): unknown }[];
+        };
+        const serializedResponse = JSON.stringify(privateResponse.components[0]?.toJSON());
+
+        expect(serializedResponse).toContain("오늘의 Wordle이 아직 준비되지 않았습니다.");
     });
 
     it("비공개 화면의 현황 보기 버튼은 채팅 위로 올라간 패널을 다시 생성합니다", async () => {
