@@ -137,4 +137,82 @@ describe("Wordle SQLite 세션 저장소", () => {
         expect(restartedStore.get(userId, puzzle.printDate, guildId)?.game).toEqual(firstGame);
         expect(restartedStore.get(otherUserId, puzzle.printDate, guildId)?.game).toEqual(otherGame);
     });
+
+    it("유효한 단어 입력 순번으로 최근 사용자 8명을 정확하게 정렬합니다", () => {
+        const store = new WordleSessionStore();
+        stores.push(store);
+        const userIds = Array.from({ length: 9 }, (_, index) => `1234567890123456${index}`);
+
+        for (const recentUserId of userIds) {
+            const game = submitGuess(createWordleGame(puzzle), "crane");
+            store.recordValidGuess(recentUserId, puzzle.printDate, guildId, createSession(game));
+        }
+
+        const firstRanking = store.getRecentPlayers(guildId, puzzle.printDate, 8);
+
+        expect(firstRanking.totalPlayers).toBe(9);
+        expect(firstRanking.players.map((player) => player.userId)).toEqual(
+            userIds.slice(1).reverse(),
+        );
+
+        const firstUserId = userIds[0];
+
+        if (firstUserId === undefined) {
+            throw new Error("최근 입력 순서를 갱신할 사용자가 없습니다.");
+        }
+
+        const updatedGame = submitGuess(
+            store.get(firstUserId, puzzle.printDate, guildId)?.game ?? createWordleGame(puzzle),
+            "slate",
+        );
+        store.recordValidGuess(firstUserId, puzzle.printDate, guildId, createSession(updatedGame));
+
+        expect(store.getRecentPlayers(guildId, puzzle.printDate, 8).players[0]?.userId).toBe(
+            firstUserId,
+        );
+    });
+
+    it("입력 순번과 채널별 공개 현황 메시지를 재시작 후에도 복원합니다", () => {
+        const databasePath = createDatabasePath();
+        const firstStore = openStore(databasePath);
+        const game = submitGuess(createWordleGame(puzzle), "crane");
+        const channelId = "32345678901234567";
+        const messageId = "42345678901234567";
+
+        firstStore.recordValidGuess(userId, puzzle.printDate, guildId, createSession(game));
+        firstStore.setPublicStatusPanel({
+            guildId,
+            channelId,
+            messageId,
+            printDate: puzzle.printDate,
+        });
+        firstStore.close();
+
+        const restartedStore = openStore(databasePath);
+
+        expect(restartedStore.getRecentPlayers(guildId, puzzle.printDate, 8)).toMatchObject({
+            totalPlayers: 1,
+            players: [
+                {
+                    userId,
+                    game,
+                    inputOrder: 1,
+                },
+            ],
+        });
+        expect(restartedStore.getPublicStatusPanel(guildId, channelId)).toEqual({
+            guildId,
+            channelId,
+            messageId,
+            printDate: puzzle.printDate,
+        });
+        expect(restartedStore.listPublicStatusPanels(guildId, puzzle.printDate)).toEqual([
+            {
+                guildId,
+                channelId,
+                messageId,
+                printDate: puzzle.printDate,
+            },
+        ]);
+    });
 });
