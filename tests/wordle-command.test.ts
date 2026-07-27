@@ -238,7 +238,7 @@ describe("Wordle 공개 메시지 전송", () => {
             .fn()
             .mockImplementation((request: unknown) =>
                 Promise.resolve(
-                    typeof request === "string"
+                    typeof request === "object" && request !== null && "message" in request
                         ? existingMessage
                         : new Map([["72345678901234567", { id: "72345678901234567" }]]),
                 ),
@@ -284,7 +284,10 @@ describe("Wordle 공개 메시지 전송", () => {
         await handleWordleButton(interaction, store);
 
         expect(deferUpdate).toHaveBeenCalledOnce();
-        expect(fetchMessage).toHaveBeenCalledWith(oldMessageId);
+        expect(fetchMessage).toHaveBeenCalledWith({
+            message: oldMessageId,
+            force: true,
+        });
         expect(fetchMessage).toHaveBeenCalledWith({
             after: oldMessageId,
             limit: 1,
@@ -360,6 +363,93 @@ describe("Wordle 공개 메시지 전송", () => {
         );
     });
 
+    it("삭제된 공개 현황 패널이 캐시에 남아 있어도 새 패널로 복구합니다", async () => {
+        const userId = "15345678901234567";
+        const channelId = "45345678901234567";
+        const deletedMessageId = "55345678901234567";
+        const replacementMessage = {
+            id: "65345678901234567",
+        } as Message;
+        const staleCachedMessage = {
+            id: deletedMessageId,
+        };
+        const fetchMessage = vi.fn().mockImplementation((request: unknown) => {
+            if (typeof request === "string") {
+                return Promise.resolve(staleCachedMessage);
+            }
+
+            if (typeof request === "object" && request !== null && "message" in request) {
+                return Promise.reject(
+                    Object.assign(new Error("Unknown Message"), {
+                        code: 10_008,
+                    }),
+                );
+            }
+
+            return Promise.resolve(new Map());
+        });
+        const send = vi.fn().mockResolvedValue(replacementMessage);
+        const editReply = vi.fn().mockResolvedValue({
+            id: "private-recreated-status-response",
+        });
+        const store = new WordleSessionStore();
+        store.set(userId, puzzle.printDate, guildId, {
+            game: createWordleGame(puzzle),
+            panelMessage: undefined,
+            privateResponseInteraction: undefined,
+            privateResponseMessageId: undefined,
+            resultShared: false,
+        });
+        store.setPublicStatusPanel({
+            guildId,
+            channelId,
+            messageId: deletedMessageId,
+            printDate: puzzle.printDate,
+        });
+        const interaction = {
+            customId: `wordle:status-panel:${puzzle.printDate}:${userId}`,
+            channel: {
+                isSendable: () => true,
+                messages: {
+                    fetch: fetchMessage,
+                },
+                send,
+            },
+            channelId,
+            guildId,
+            deferUpdate: vi.fn().mockResolvedValue(undefined),
+            editReply,
+            id: "recreate-deleted-status-panel-button",
+            user: {
+                id: userId,
+            },
+        } as unknown as ButtonInteraction;
+
+        await handleWordleButton(interaction, store);
+
+        expect(fetchMessage).toHaveBeenCalledOnce();
+        expect(fetchMessage).toHaveBeenCalledWith({
+            message: deletedMessageId,
+            force: true,
+        });
+        expect(send).toHaveBeenCalledOnce();
+        expect(store.getPublicStatusPanel(guildId, channelId)?.messageId).toBe(
+            replacementMessage.id,
+        );
+
+        const privateResponse = editReply.mock.calls[0]?.[0] as {
+            components: { toJSON(): unknown }[];
+        };
+        const serializedResponse = JSON.stringify(privateResponse.components[0]?.toJSON());
+
+        expect(serializedResponse).toContain(
+            "Wordle 공개 현황 패널을 채널 아래에 다시 생성했습니다.",
+        );
+        expect(serializedResponse).toContain(
+            `https://discord.com/channels/${guildId}/${channelId}/${replacementMessage.id}`,
+        );
+    });
+
     it("공개 현황 패널이 최신 위치에 있으면 재생성하지 않고 이동 링크를 표시합니다", async () => {
         const userId = "14345678901234567";
         const channelId = "44345678901234567";
@@ -367,7 +457,7 @@ describe("Wordle 공개 메시지 전송", () => {
         const deleteMessage = vi.fn();
         const fetchMessage = vi.fn().mockImplementation((request: unknown) =>
             Promise.resolve(
-                typeof request === "string"
+                typeof request === "object" && request !== null && "message" in request
                     ? {
                           id: statusMessageId,
                           delete: deleteMessage,
@@ -414,7 +504,10 @@ describe("Wordle 공개 메시지 전송", () => {
 
         await handleWordleButton(interaction, store);
 
-        expect(fetchMessage).toHaveBeenCalledWith(statusMessageId);
+        expect(fetchMessage).toHaveBeenCalledWith({
+            message: statusMessageId,
+            force: true,
+        });
         expect(fetchMessage).toHaveBeenCalledWith({
             after: statusMessageId,
             limit: 1,
@@ -1411,7 +1504,10 @@ describe("Wordle 모달 입력", () => {
 
         await handleWordleModal(interaction, store, dictionary);
 
-        expect(fetchStatusMessage).toHaveBeenCalledWith(statusMessageId);
+        expect(fetchStatusMessage).toHaveBeenCalledWith({
+            message: statusMessageId,
+            force: true,
+        });
         expect(statusMessageEdit).toHaveBeenCalledOnce();
         expect(store.getRecentPlayers(guildId, puzzle.printDate, 8)).toMatchObject({
             totalPlayers: 1,
@@ -1435,8 +1531,8 @@ describe("Wordle 모달 입력", () => {
             roles: [],
             repliedUser: false,
         });
-        expect(serializedStatus).toContain(`<@${userId}> 🟨 · 1/6`);
-        expect(serializedStatus).toContain("3개의 알파벳을 찾음");
+        expect(serializedStatus).toContain(`<@${userId}> **진행 중** · **1/6**`);
+        expect(serializedStatus).toContain("찾음: 🟨 2개 · 🟩 1개");
         expect(serializedStatus).toContain(`wordle:status-view:${puzzle.printDate}:${userId}`);
         expect(serializedStatus).not.toContain("alley");
         expect(serializedStatus).not.toContain("apple");

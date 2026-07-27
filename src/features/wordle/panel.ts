@@ -69,32 +69,32 @@ function createSeparator(): SeparatorBuilder {
     return new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small);
 }
 
-function getStatusEmoji(status: GameStatus): string {
+function getPublicStatusLabel(status: GameStatus): string {
     switch (status) {
         case "won":
-            return "🟩";
+            return "성공";
         case "lost":
-            return "⬛";
+            return "실패";
         case "playing":
-            return "🟨";
+            return "진행 중";
     }
 }
 
-export function getFoundAlphabetCount(game: WordleGame): number {
-    const foundLetters = new Set<string>();
+export function getFoundAlphabetCounts(
+    game: WordleGame,
+): Readonly<{ present: number; correct: number }> {
+    let present = 0;
+    let correct = 0;
 
-    for (const guess of game.guesses) {
-        for (let index = 0; index < guess.word.length; index += 1) {
-            const tile = guess.tiles[index];
-            const letter = guess.word[index];
-
-            if (letter !== undefined && (tile === "present" || tile === "correct")) {
-                foundLetters.add(letter.toUpperCase());
-            }
+    for (const state of getAlphabetStates(game).values()) {
+        if (state === "present") {
+            present += 1;
+        } else if (state === "correct") {
+            correct += 1;
         }
     }
 
-    return foundLetters.size;
+    return { present, correct };
 }
 
 export function createWordlePublicStatusContainer(
@@ -131,15 +131,15 @@ export function createWordlePublicStatusContainer(
 
     for (const entry of entries) {
         const attemptCount = `${entry.game.guesses.length}/${WORDLE_MAX_GUESSES}`;
-        const foundAlphabetCount = getFoundAlphabetCount(entry.game);
+        const foundAlphabetCounts = getFoundAlphabetCounts(entry.game);
 
         container.addSectionComponents(
             new SectionBuilder()
                 .addTextDisplayComponents(
                     new TextDisplayBuilder().setContent(
                         [
-                            `<@${entry.userId}> ${getStatusEmoji(entry.game.status)} · ${attemptCount}`,
-                            `${foundAlphabetCount}개의 알파벳을 찾음`,
+                            `<@${entry.userId}> **${getPublicStatusLabel(entry.game.status)}** · **${attemptCount}**`,
+                            `찾음: ${TILE_EMOJI.present} ${foundAlphabetCounts.present}개 · ${TILE_EMOJI.correct} ${foundAlphabetCounts.correct}개`,
                         ].join("\n"),
                     ),
                 )
