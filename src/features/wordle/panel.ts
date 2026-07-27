@@ -1,11 +1,12 @@
 import {
+    ButtonBuilder,
     ContainerBuilder,
     SectionBuilder,
     SeparatorBuilder,
     TextDisplayBuilder,
     ThumbnailBuilder,
 } from "@discordjs/builders";
-import { Colors, SeparatorSpacingSize } from "discord.js";
+import { ButtonStyle, Colors, SeparatorSpacingSize } from "discord.js";
 
 import { WORDLE_MAX_GUESSES } from "./game.js";
 import type { GameStatus, TileState, WordleGame } from "./game.js";
@@ -32,6 +33,12 @@ const SUCCESS_MESSAGES = [
     "Great",
     "Phew",
 ] as const;
+const PUBLIC_STATUS_PLAYER_LIMIT = 8;
+
+export interface WordlePublicStatusEntry {
+    userId: string;
+    game: WordleGame;
+}
 
 function getStatusText(game: WordleGame): string {
     switch (game.status) {
@@ -60,6 +67,94 @@ function getPanelColor(status: GameStatus): number {
 
 function createSeparator(): SeparatorBuilder {
     return new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small);
+}
+
+function getStatusEmoji(status: GameStatus): string {
+    switch (status) {
+        case "won":
+            return "🟩";
+        case "lost":
+            return "⬛";
+        case "playing":
+            return "🟨";
+    }
+}
+
+export function getFoundAlphabetCount(game: WordleGame): number {
+    const foundLetters = new Set<string>();
+
+    for (const guess of game.guesses) {
+        for (let index = 0; index < guess.word.length; index += 1) {
+            const tile = guess.tiles[index];
+            const letter = guess.word[index];
+
+            if (letter !== undefined && (tile === "present" || tile === "correct")) {
+                foundLetters.add(letter.toUpperCase());
+            }
+        }
+    }
+
+    return foundLetters.size;
+}
+
+export function createWordlePublicStatusContainer(
+    entries: readonly WordlePublicStatusEntry[],
+    totalPlayers: number,
+    printDate: string,
+): ContainerBuilder {
+    if (entries.length > PUBLIC_STATUS_PLAYER_LIMIT) {
+        throw new RangeError(
+            `Wordle 공개 현황에는 최대 ${PUBLIC_STATUS_PLAYER_LIMIT}명만 표시할 수 있습니다.`,
+        );
+    }
+
+    if (!Number.isSafeInteger(totalPlayers) || totalPlayers < entries.length) {
+        throw new RangeError("Wordle 공개 현황의 전체 참여자 수가 올바르지 않습니다.");
+    }
+
+    const container = new ContainerBuilder()
+        .setAccentColor(Colors.Blurple)
+        .addTextDisplayComponents(
+            new TextDisplayBuilder().setContent(
+                [
+                    "### 오늘의 Wordle 현황",
+                    `-# 최근 입력 순 ${entries.length}명 표시 · 전체 ${totalPlayers}명 · ${printDate}`,
+                ].join("\n"),
+            ),
+        );
+
+    if (entries.length === 0) {
+        return container.addTextDisplayComponents(
+            new TextDisplayBuilder().setContent("아직 유효한 단어를 입력한 사용자가 없습니다."),
+        );
+    }
+
+    for (const entry of entries) {
+        const attemptCount = `${entry.game.guesses.length}/${WORDLE_MAX_GUESSES}`;
+        const foundAlphabetCount = getFoundAlphabetCount(entry.game);
+
+        container.addSectionComponents(
+            new SectionBuilder()
+                .addTextDisplayComponents(
+                    new TextDisplayBuilder().setContent(
+                        [
+                            `<@${entry.userId}> ${getStatusEmoji(entry.game.status)} · ${attemptCount}`,
+                            `${foundAlphabetCount}개의 알파벳을 찾음`,
+                        ].join("\n"),
+                    ),
+                )
+                .setButtonAccessory(
+                    new ButtonBuilder()
+                        .setCustomId(
+                            `wordle:status-view:${entry.game.puzzle.printDate}:${entry.userId}`,
+                        )
+                        .setLabel("보기")
+                        .setStyle(ButtonStyle.Secondary),
+                ),
+        );
+    }
+
+    return container;
 }
 
 export function createPublicWordleContainer(

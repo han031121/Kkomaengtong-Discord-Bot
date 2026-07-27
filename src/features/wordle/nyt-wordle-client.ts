@@ -51,7 +51,20 @@ export class NytWordleClient {
         return this.getPuzzle(formatDateInTimeZone(now, this.timeZone));
     }
 
-    public getPuzzle(date: string): Promise<WordlePuzzle> {
+    public getPuzzle(
+        date: string,
+        options: { forceRefresh?: boolean } = {},
+    ): Promise<WordlePuzzle> {
+        if (options.forceRefresh === true) {
+            const request = this.fetchPuzzle(date).catch((error: unknown) => {
+                this.cache.delete(date);
+                throw error;
+            });
+            this.cache.set(date, request);
+
+            return request;
+        }
+
         const cachedPuzzle = this.cache.get(date);
 
         if (cachedPuzzle !== undefined) {

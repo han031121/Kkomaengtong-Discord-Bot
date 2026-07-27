@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { LocalDictionary } from "../src/features/wordle/local-dictionary.js";
 import {
@@ -6,6 +6,15 @@ import {
     NytWordleClient,
     NytWordleServiceError,
 } from "../src/features/wordle/nyt-wordle-client.js";
+import {
+    getMillisecondsUntilNextDateInTimeZone,
+    WordlePuzzleCache,
+    WordlePuzzleUnavailableError,
+} from "../src/features/wordle/puzzle-cache.js";
+
+afterEach(() => {
+    vi.useRealTimers();
+});
 
 describe("NYT Wordle 클라이언트", () => {
     it("서울 날짜를 YYYY-MM-DD 형식으로 계산합니다", () => {
@@ -45,6 +54,28 @@ describe("NYT Wordle 클라이언트", () => {
         );
     });
 
+    it("강제 갱신은 같은 날짜 캐시를 우회합니다", async () => {
+        const fetchMock = vi.fn<typeof fetch>().mockImplementation(() =>
+            Promise.resolve(
+                new Response(
+                    JSON.stringify({
+                        id: 42,
+                        solution: "CRANE",
+                        print_date: "2026-07-23",
+                        days_since_launch: 1890,
+                    }),
+                    { status: 200, headers: { "content-type": "application/json" } },
+                ),
+            ),
+        );
+        const client = new NytWordleClient(fetchMock);
+
+        await client.getPuzzle("2026-07-23", { forceRefresh: true });
+        await client.getPuzzle("2026-07-23", { forceRefresh: true });
+
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
     it("예상과 다른 NYT 응답을 서비스 오류로 처리합니다", async () => {
         const fetchMock = vi
             .fn<typeof fetch>()
@@ -70,6 +101,73 @@ describe("NYT Wordle 클라이언트", () => {
         await expect(client.getPuzzle("2026-07-23")).rejects.toThrow(
             "NYT Wordle 응답 날짜가 요청한 날짜와 다릅니다.",
         );
+    });
+});
+
+describe("Wordle 퍼즐 캐시", () => {
+    const cachedPuzzle = {
+        id: 42,
+        solution: "crane",
+        printDate: "2026-07-23",
+        puzzleNumber: 1890,
+    };
+
+    it("refresh 때만 클라이언트를 호출하고 조회는 캐시만 읽습니다", async () => {
+        const getPuzzle = vi.fn().mockResolvedValue(cachedPuzzle);
+        const cache = new WordlePuzzleCache({ getPuzzle });
+
+        await expect(cache.refresh(new Date("2026-07-22T15:30:00.000Z"))).resolves.toEqual(
+            cachedPuzzle,
+        );
+        expect(cache.getTodaysPuzzle(new Date("2026-07-22T15:30:00.000Z"))).toEqual(cachedPuzzle);
+
+        expect(getPuzzle).toHaveBeenCalledOnce();
+        expect(getPuzzle).toHaveBeenCalledWith("2026-07-23", { forceRefresh: true });
+    });
+
+    it("캐시된 퍼즐 날짜가 오늘과 다르면 준비되지 않은 상태로 처리합니다", async () => {
+        const getPuzzle = vi.fn().mockResolvedValue(cachedPuzzle);
+        const cache = new WordlePuzzleCache({ getPuzzle });
+
+        await cache.refresh(new Date("2026-07-22T15:30:00.000Z"));
+
+        expect(() => cache.getTodaysPuzzle(new Date("2026-07-23T15:30:00.000Z"))).toThrow(
+            WordlePuzzleUnavailableError,
+        );
+        expect(getPuzzle).toHaveBeenCalledOnce();
+    });
+
+    it("서울 기준 다음 날짜 변경까지 남은 시간을 계산합니다", () => {
+        const delayMs = getMillisecondsUntilNextDateInTimeZone(
+            new Date("2026-07-22T14:59:59.500Z"),
+            "Asia/Seoul",
+        );
+
+        expect(delayMs).toBe(500);
+    });
+
+    it("일일 갱신은 서울 자정부터 00시 10분까지 매분 클라이언트를 강제 호출합니다", async () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date("2026-07-22T14:59:59.000Z"));
+
+        const getPuzzle = vi.fn().mockResolvedValue(cachedPuzzle);
+        const cache = new WordlePuzzleCache({ getPuzzle }, "Asia/Seoul", 0);
+
+        cache.startDailyRefresh();
+        await vi.advanceTimersByTimeAsync(999);
+
+        expect(getPuzzle).not.toHaveBeenCalled();
+
+        await vi.advanceTimersByTimeAsync(1);
+
+        expect(getPuzzle).toHaveBeenCalledOnce();
+
+        await vi.advanceTimersByTimeAsync(600_000);
+
+        expect(getPuzzle).toHaveBeenCalledTimes(11);
+        expect(getPuzzle).toHaveBeenLastCalledWith("2026-07-23", { forceRefresh: true });
+
+        cache.stopDailyRefresh();
     });
 });
 

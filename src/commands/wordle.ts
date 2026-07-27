@@ -11,6 +11,7 @@ import type {
     ChatInputCommandInteraction,
     Message,
     ModalSubmitInteraction,
+    SendableChannels,
 } from "discord.js";
 import { LabelBuilder, ModalBuilder, TextInputBuilder } from "@discordjs/builders";
 
@@ -21,23 +22,27 @@ import {
     submitGuess,
     WORDLE_MAX_GUESSES,
 } from "../features/wordle/game.js";
-import type { WordleGame } from "../features/wordle/game.js";
+import type { WordleGame, WordlePuzzle } from "../features/wordle/game.js";
 import { LocalDictionary } from "../features/wordle/local-dictionary.js";
-import { NytWordleClient, NytWordleServiceError } from "../features/wordle/nyt-wordle-client.js";
+import {
+    WordlePuzzleUnavailableError,
+    wordlePuzzleCache,
+} from "../features/wordle/puzzle-cache.js";
 import {
     createPrivateWordleContainer,
     createPublicWordleContainer,
+    createWordlePublicStatusContainer,
     createWordleNoticeContainer,
     createWordleSpoilerContainer,
 } from "../features/wordle/panel.js";
 import { WordleSessionStore } from "../features/wordle/session-store.js";
-import type { WordleSession } from "../features/wordle/session-store.js";
+import type { WordlePublicStatusPanel, WordleSession } from "../features/wordle/session-store.js";
 import type { BotCommand } from "../types/command.js";
 
 const localDictionary = new LocalDictionary();
-const nytWordleClient = new NytWordleClient();
 const sessionStore = new WordleSessionStore();
 const userLock = new AsyncKeyedLock();
+const publicStatusPanelLock = new AsyncKeyedLock();
 const RECOVERABLE_PANEL_ERROR_CODES = new Set([
     10_003, // Unknown Channel
     10_008, // Unknown Message
@@ -49,14 +54,27 @@ const WORDLE_SHARE_BUTTON_PREFIX = "wordle:share";
 const WORDLE_SPOILER_BUTTON_PREFIX = "wordle:spoiler";
 const WORDLE_INPUT_BUTTON_PREFIX = "wordle:input";
 const WORDLE_PROGRESS_SHARE_BUTTON_PREFIX = "wordle:progress-share";
+const WORDLE_STATUS_PANEL_BUTTON_PREFIX = "wordle:status-panel";
 const WORDLE_GUESS_MODAL_PREFIX = "wordle:guess-modal";
 const WORDLE_GUESS_INPUT_ID = "wordle:guess";
 const WORDLE_GUESS_OPTION_NAME = "단어";
+const WORDLE_PUBLIC_STATUS_PLAYER_LIMIT = 8;
+const SUPPRESSED_ALLOWED_MENTIONS = {
+    parse: [],
+    users: [],
+    roles: [],
+    repliedUser: false,
+} as const;
 
 type WordleInteraction = ChatInputCommandInteraction | ButtonInteraction | ModalSubmitInteraction;
 type WordleGuessInteraction = ChatInputCommandInteraction | ModalSubmitInteraction;
-type WordleButtonAction = "share" | "spoiler" | "input" | "progress-share";
+type WordleButtonAction =
+    "share" | "spoiler" | "input" | "progress-share" | "status-panel" | "status-view";
 type WordleDictionary = Pick<LocalDictionary, "isEnglishWord">;
+
+export interface WordlePuzzleProvider {
+    getTodaysPuzzle(now?: Date): WordlePuzzle;
+}
 
 interface ParsedWordleButton {
     action: WordleButtonAction;
@@ -112,16 +130,326 @@ export async function sendPublicWordlePanel(
     });
 }
 
+async function resolveSendableChannel(
+    interaction: WordleInteraction,
+    channelId: string,
+): Promise<SendableChannels> {
+    const currentChannel = interaction.channel;
+
+    if (
+        interaction.channelId === channelId &&
+        currentChannel !== null &&
+        currentChannel !== undefined &&
+        currentChannel.isSendable()
+    ) {
+        return currentChannel;
+    }
+
+    const channel = await interaction.client.channels.fetch(channelId);
+
+    if (channel === null || !channel.isSendable()) {
+        throw new Error("Wordle 공개 현황 패널을 보낼 수 있는 채널이 아닙니다.");
+    }
+
+    return channel;
+}
+
+function createPublicStatusPanelComponent(
+    store: WordleSessionStore,
+    guildId: string,
+    printDate: string,
+) {
+    const recentPlayers = store.getRecentPlayers(
+        guildId,
+        printDate,
+        WORDLE_PUBLIC_STATUS_PLAYER_LIMIT,
+    );
+
+    return createWordlePublicStatusContainer(
+        recentPlayers.players,
+        recentPlayers.totalPlayers,
+        printDate,
+    );
+}
+
+async function sendPublicStatusPanelMessage(
+    channel: SendableChannels,
+    store: WordleSessionStore,
+    guildId: string,
+    printDate: string,
+): Promise<Message> {
+    return channel.send({
+        components: [createPublicStatusPanelComponent(store, guildId, printDate)],
+        flags: MessageFlags.IsComponentsV2,
+        allowedMentions: SUPPRESSED_ALLOWED_MENTIONS,
+    });
+}
+
+async function deleteExistingPublicStatusMessage(
+    channel: SendableChannels,
+    panel: WordlePublicStatusPanel,
+): Promise<void> {
+    try {
+        const message = await channel.messages.fetch(panel.messageId);
+        await message.delete();
+    } catch (error) {
+        if (getDiscordErrorCode(error) === 10_008) {
+            return;
+        }
+
+        throw error;
+    }
+}
+
+async function createAndStorePublicStatusPanel(
+    channel: SendableChannels,
+    store: WordleSessionStore,
+    guildId: string,
+    channelId: string,
+    printDate: string,
+): Promise<Message> {
+    const message = await sendPublicStatusPanelMessage(channel, store, guildId, printDate);
+    store.setPublicStatusPanel({
+        guildId,
+        channelId,
+        messageId: message.id,
+        printDate,
+    });
+
+    return message;
+}
+
+export async function replaceWordlePublicStatusPanel(
+    interaction: WordleInteraction,
+    printDate: string,
+    store: WordleSessionStore = sessionStore,
+): Promise<Message> {
+    const guildId = getWordleGuildId(interaction);
+    const channelId = interaction.channelId;
+
+    if (channelId === null) {
+        throw new Error("Wordle 공개 현황 패널을 생성할 채널을 찾을 수 없습니다.");
+    }
+
+    return publicStatusPanelLock.runExclusive(guildId, async () => {
+        const channel = await resolveSendableChannel(interaction, channelId);
+        const previousPanel = store.getPublicStatusPanel(guildId, channelId);
+
+        if (previousPanel !== undefined) {
+            await deleteExistingPublicStatusMessage(channel, previousPanel);
+            store.deletePublicStatusPanel(guildId, channelId);
+        }
+
+        return createAndStorePublicStatusPanel(channel, store, guildId, channelId, printDate);
+    });
+}
+
+type WordlePublicStatusPanelAccess = "created" | "existing" | "recreated";
+
+interface WordlePublicStatusPanelAccessResult {
+    action: WordlePublicStatusPanelAccess;
+    messageId: string;
+}
+
+async function accessWordlePublicStatusPanel(
+    interaction: WordleInteraction,
+    printDate: string,
+    store: WordleSessionStore,
+): Promise<WordlePublicStatusPanelAccessResult> {
+    const guildId = getWordleGuildId(interaction);
+    const channelId = interaction.channelId;
+
+    if (channelId === null) {
+        throw new Error("Wordle 공개 현황 패널을 확인할 채널을 찾을 수 없습니다.");
+    }
+
+    return publicStatusPanelLock.runExclusive(guildId, async () => {
+        const channel = await resolveSendableChannel(interaction, channelId);
+        const panel = store.getPublicStatusPanel(guildId, channelId);
+
+        if (panel === undefined) {
+            const message = await createAndStorePublicStatusPanel(
+                channel,
+                store,
+                guildId,
+                channelId,
+                printDate,
+            );
+
+            return {
+                action: "created",
+                messageId: message.id,
+            };
+        }
+
+        if (panel.printDate !== printDate) {
+            await deleteExistingPublicStatusMessage(channel, panel);
+            store.deletePublicStatusPanel(guildId, channelId);
+            const message = await createAndStorePublicStatusPanel(
+                channel,
+                store,
+                guildId,
+                channelId,
+                printDate,
+            );
+
+            return {
+                action: "recreated",
+                messageId: message.id,
+            };
+        }
+
+        let message: Message;
+
+        try {
+            message = await channel.messages.fetch(panel.messageId);
+        } catch (error) {
+            if (getDiscordErrorCode(error) !== 10_008) {
+                throw error;
+            }
+
+            store.deletePublicStatusPanel(guildId, channelId);
+            const replacementMessage = await createAndStorePublicStatusPanel(
+                channel,
+                store,
+                guildId,
+                channelId,
+                printDate,
+            );
+
+            return {
+                action: "recreated",
+                messageId: replacementMessage.id,
+            };
+        }
+
+        const newerMessages = await channel.messages.fetch({
+            after: panel.messageId,
+            limit: 1,
+        });
+
+        if (newerMessages.size === 0) {
+            return {
+                action: "existing",
+                messageId: message.id,
+            };
+        }
+
+        await message.delete();
+        store.deletePublicStatusPanel(guildId, channelId);
+        const replacementMessage = await createAndStorePublicStatusPanel(
+            channel,
+            store,
+            guildId,
+            channelId,
+            printDate,
+        );
+
+        return {
+            action: "recreated",
+            messageId: replacementMessage.id,
+        };
+    });
+}
+
+async function refreshPublicStatusPanelMessage(
+    interaction: WordleInteraction,
+    panel: WordlePublicStatusPanel,
+    store: WordleSessionStore,
+): Promise<void> {
+    let channel: SendableChannels;
+
+    try {
+        channel = await resolveSendableChannel(interaction, panel.channelId);
+    } catch (error) {
+        const errorCode = getDiscordErrorCode(error);
+
+        if (
+            errorCode !== undefined &&
+            (errorCode === 10_003 || errorCode === 50_001 || errorCode === 50_013)
+        ) {
+            store.deletePublicStatusPanel(panel.guildId, panel.channelId);
+            return;
+        }
+
+        throw error;
+    }
+
+    try {
+        const message = await channel.messages.fetch(panel.messageId);
+        await message.edit({
+            content: null,
+            embeds: [],
+            components: [createPublicStatusPanelComponent(store, panel.guildId, panel.printDate)],
+            flags: MessageFlags.IsComponentsV2,
+            allowedMentions: SUPPRESSED_ALLOWED_MENTIONS,
+        });
+    } catch (error) {
+        const errorCode = getDiscordErrorCode(error);
+
+        if (
+            errorCode !== undefined &&
+            (errorCode === 10_003 || errorCode === 50_001 || errorCode === 50_013)
+        ) {
+            store.deletePublicStatusPanel(panel.guildId, panel.channelId);
+            return;
+        }
+
+        if (errorCode !== 10_008) {
+            throw error;
+        }
+
+        const replacementMessage = await sendPublicStatusPanelMessage(
+            channel,
+            store,
+            panel.guildId,
+            panel.printDate,
+        );
+        store.setPublicStatusPanel({
+            ...panel,
+            messageId: replacementMessage.id,
+        });
+    }
+}
+
+export async function refreshWordlePublicStatusPanels(
+    interaction: WordleInteraction,
+    printDate: string,
+    store: WordleSessionStore = sessionStore,
+): Promise<void> {
+    const guildId = getWordleGuildId(interaction);
+
+    if (store.listPublicStatusPanels(guildId, printDate).length === 0) {
+        return;
+    }
+
+    await publicStatusPanelLock.runExclusive(guildId, async () => {
+        const panels = store.listPublicStatusPanels(guildId, printDate);
+
+        for (const panel of panels) {
+            await refreshPublicStatusPanelMessage(interaction, panel, store);
+        }
+    });
+}
+
 function createButtonCustomId(
     prefix:
         | typeof WORDLE_SHARE_BUTTON_PREFIX
         | typeof WORDLE_SPOILER_BUTTON_PREFIX
         | typeof WORDLE_INPUT_BUTTON_PREFIX
-        | typeof WORDLE_PROGRESS_SHARE_BUTTON_PREFIX,
+        | typeof WORDLE_PROGRESS_SHARE_BUTTON_PREFIX
+        | typeof WORDLE_STATUS_PANEL_BUTTON_PREFIX,
     printDate: string,
     userId: string,
 ): string {
     return `${prefix}:${printDate}:${userId}`;
+}
+
+function createWordleStatusPanelButton(printDate: string, userId: string): ButtonBuilder {
+    return new ButtonBuilder()
+        .setCustomId(createButtonCustomId(WORDLE_STATUS_PANEL_BUTTON_PREFIX, printDate, userId))
+        .setLabel("공개 현황 보기")
+        .setStyle(ButtonStyle.Secondary);
 }
 
 export function createWordlePlayingButtons(
@@ -150,7 +478,9 @@ export function createWordlePlayingButtons(
         actionRow.addComponents(progressShareButton);
     }
 
-    return actionRow;
+    return actionRow.addComponents(
+        createWordleStatusPanelButton(session.game.puzzle.printDate, userId),
+    );
 }
 
 export function createWordleGuessModal(printDate: string, userId: string): ModalBuilder {
@@ -199,7 +529,9 @@ export function createWordleResultButtons(
         actionRow.addComponents(spoilerButton);
     }
 
-    return actionRow;
+    return actionRow.addComponents(
+        createWordleStatusPanelButton(session.game.puzzle.printDate, userId),
+    );
 }
 
 export function createWordleResultComponents(
@@ -255,7 +587,9 @@ function parseWordleButton(customId: string): ParsedWordleButton | undefined {
         (action !== "share" &&
             action !== "spoiler" &&
             action !== "input" &&
-            action !== "progress-share") ||
+            action !== "progress-share" &&
+            action !== "status-panel" &&
+            action !== "status-view") ||
         printDate === undefined ||
         !/^\d{4}-\d{2}-\d{2}$/.test(printDate) ||
         userId === undefined ||
@@ -490,19 +824,22 @@ async function processGuess(
     }
 
     const updatedGame = submitGuess(currentSession.game, guess);
+    const sessionWithUpdatedGame: WordleSession = {
+        ...currentSession,
+        game: updatedGame,
+    };
+    store.recordValidGuess(interaction.user.id, printDate, guildId, sessionWithUpdatedGame);
     const panelMessage =
         currentSession.panelMessage === undefined
             ? undefined
             : await updatePublicWordlePanel(interaction, currentSession, updatedGame);
 
     const updatedSession: WordleSession = {
-        game: updatedGame,
+        ...sessionWithUpdatedGame,
         panelMessage,
-        privateResponseInteraction: currentSession.privateResponseInteraction,
-        privateResponseMessageId: currentSession.privateResponseMessageId,
-        resultShared: currentSession.resultShared,
     };
     store.set(interaction.user.id, printDate, guildId, updatedSession);
+    await refreshWordlePublicStatusPanels(interaction, printDate, store);
 
     await updatePrivateWordleState(
         interaction,
@@ -590,6 +927,48 @@ async function submitWordleCommandGuess(
     }
 
     await processGuess(interaction, session.game.puzzle.printDate, guess, store, dictionary);
+}
+
+async function handlePublicStatusPanelButton(
+    interaction: ButtonInteraction,
+    parsedButton: ParsedWordleButton,
+    store: WordleSessionStore,
+): Promise<void> {
+    const guildId = getWordleGuildId(interaction);
+    await interaction.deferUpdate();
+
+    await userLock.runExclusive(parsedButton.userId, async () => {
+        const latestSession = store.get(parsedButton.userId, parsedButton.printDate, guildId);
+
+        if (latestSession === undefined) {
+            await interaction.editReply(
+                createNoticeEditResponse(
+                    "Wordle 게임 정보를 찾을 수 없습니다. `/워들`로 게임을 다시 시작해 주세요.",
+                ),
+            );
+            return;
+        }
+
+        const panelAccess = await accessWordlePublicStatusPanel(
+            interaction,
+            parsedButton.printDate,
+            store,
+        );
+        const panelUrl = `https://discord.com/channels/${guildId}/${interaction.channelId}/${panelAccess.messageId}`;
+        const notice =
+            panelAccess.action === "created"
+                ? "이 채널에 Wordle 공개 현황 패널을 생성했습니다."
+                : panelAccess.action === "existing"
+                  ? "Wordle 공개 현황 패널이 채널의 최신 위치에 있습니다."
+                  : "Wordle 공개 현황 패널을 채널 아래에 다시 생성했습니다.";
+
+        await updatePrivateWordleState(
+            interaction,
+            latestSession,
+            `${notice}\n[공개 현황으로 이동](${panelUrl})`,
+            store,
+        );
+    });
 }
 
 async function handleProgressShareButton(
@@ -728,6 +1107,28 @@ export async function handleSpoilerButton(
     });
 }
 
+async function handlePublicStatusViewButton(
+    interaction: ButtonInteraction,
+    parsedButton: ParsedWordleButton,
+    store: WordleSessionStore,
+): Promise<void> {
+    const guildId = getWordleGuildId(interaction);
+    const session = store.get(parsedButton.userId, parsedButton.printDate, guildId);
+
+    if (session === undefined) {
+        await interaction.reply(
+            createEphemeralNoticeResponse("해당 사용자의 Wordle 진행 정보를 찾을 수 없습니다."),
+        );
+        return;
+    }
+
+    await interaction.reply({
+        components: [createPublicWordleContainer(session.game, parsedButton.userId)],
+        flags: MessageFlags.Ephemeral | MessageFlags.IsComponentsV2,
+        allowedMentions: SUPPRESSED_ALLOWED_MENTIONS,
+    });
+}
+
 export async function handleWordleButton(
     interaction: ButtonInteraction,
     store: WordleSessionStore = sessionStore,
@@ -739,6 +1140,11 @@ export async function handleWordleButton(
     }
 
     const guildId = getWordleGuildId(interaction);
+
+    if (parsedButton.action === "status-view") {
+        await handlePublicStatusViewButton(interaction, parsedButton, store);
+        return;
+    }
 
     if (interaction.user.id !== parsedButton.userId) {
         await interaction.reply(
@@ -757,6 +1163,11 @@ export async function handleWordleButton(
                 "Wordle 게임 정보를 찾을 수 없습니다. 봇이 재시작되었을 수 있습니다.",
             ),
         );
+        return;
+    }
+
+    if (parsedButton.action === "status-panel") {
+        await handlePublicStatusPanelButton(interaction, parsedButton, store);
         return;
     }
 
@@ -842,12 +1253,13 @@ export async function handleWordleModal(
 async function executeWordle(
     interaction: ChatInputCommandInteraction,
     store: WordleSessionStore,
+    puzzleProvider: WordlePuzzleProvider,
 ): Promise<void> {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const rawGuess = interaction.options.getString(WORDLE_GUESS_OPTION_NAME);
 
     try {
-        const puzzle = await nytWordleClient.getTodaysPuzzle();
+        const puzzle = puzzleProvider.getTodaysPuzzle();
         const game = createWordleGame(puzzle);
         await userLock.runExclusive(interaction.user.id, async () => {
             if (rawGuess === null) {
@@ -858,11 +1270,11 @@ async function executeWordle(
             await submitWordleCommandGuess(interaction, game, rawGuess, store, localDictionary);
         });
     } catch (error) {
-        if (error instanceof NytWordleServiceError) {
-            console.error("오늘의 NYT Wordle을 불러오지 못했습니다.", error);
+        if (error instanceof WordlePuzzleUnavailableError) {
+            console.error("오늘의 NYT Wordle 캐시를 찾을 수 없습니다.", error);
             await interaction.editReply(
                 createNoticeEditResponse(
-                    "오늘의 NYT Wordle을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.",
+                    "오늘의 Wordle이 아직 준비되지 않았습니다. 봇 시작 또는 날짜 갱신 시 캐시에 실패했을 수 있습니다.",
                 ),
             );
             return;
@@ -872,11 +1284,14 @@ async function executeWordle(
     }
 }
 
-export function createWordleCommand(store: WordleSessionStore): BotCommand {
+export function createWordleCommand(
+    store: WordleSessionStore,
+    puzzleProvider: WordlePuzzleProvider = wordlePuzzleCache,
+): BotCommand {
     return {
         data,
-        execute: (interaction) => executeWordle(interaction, store),
+        execute: (interaction) => executeWordle(interaction, store, puzzleProvider),
     };
 }
 
-export const wordleCommand = createWordleCommand(sessionStore);
+export const wordleCommand = createWordleCommand(sessionStore, wordlePuzzleCache);

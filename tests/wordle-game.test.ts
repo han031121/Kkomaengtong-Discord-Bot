@@ -10,6 +10,8 @@ import type { WordlePuzzle } from "../src/features/wordle/game.js";
 import {
     createPrivateWordleContainer,
     createPublicWordleContainer,
+    createWordlePublicStatusContainer,
+    getFoundAlphabetCount,
 } from "../src/features/wordle/panel.js";
 
 const puzzle: WordlePuzzle = {
@@ -97,6 +99,55 @@ describe("Wordle 공개 패널", () => {
 
         expect(firstAttemptPanel).toContain("성공 · 1/6 · **_Genius_**");
         expect(secondAttemptPanel).toContain("성공 · 2/6 · **_Magnificent_**");
+    });
+});
+
+describe("Wordle 공개 현황 패널", () => {
+    it("사용자 상태를 두 줄과 accessory 보기 버튼으로 표시합니다", () => {
+        const game = submitGuess(createWordleGame(puzzle), "alley");
+        const container = createWordlePublicStatusContainer(
+            [
+                {
+                    userId: "12345678901234567",
+                    game,
+                },
+            ],
+            3,
+            puzzle.printDate,
+        ).toJSON();
+        const panelJson = JSON.stringify(container);
+
+        expect(container.components.map((component) => component.type)).toEqual([10, 9]);
+        expect(container.components[1]).toMatchObject({
+            components: [
+                {
+                    type: 10,
+                    content: "<@12345678901234567> 🟨 · 1/6\n3개의 알파벳을 찾음",
+                },
+            ],
+            accessory: {
+                type: 2,
+                custom_id: "wordle:status-view:2026-07-23:12345678901234567",
+                label: "보기",
+                style: 2,
+            },
+        });
+        expect(panelJson).toContain("최근 입력 순 1명 표시 · 전체 3명");
+        expect(panelJson).not.toContain("alley");
+        expect(panelJson).not.toContain("apple");
+        expect(getFoundAlphabetCount(game)).toBe(3);
+    });
+
+    it("한 패널에는 최대 8명만 허용합니다", () => {
+        const game = submitGuess(createWordleGame(puzzle), "crane");
+        const entries = Array.from({ length: 9 }, (_, index) => ({
+            userId: `1234567890123456${index}`,
+            game,
+        }));
+
+        expect(() =>
+            createWordlePublicStatusContainer(entries, entries.length, puzzle.printDate),
+        ).toThrow("최대 8명");
     });
 });
 
