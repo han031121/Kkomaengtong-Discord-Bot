@@ -107,7 +107,8 @@ TypeScript와 discord.js로 만든 간단한 Discord 슬래시 명령어 봇입�
 ├── src/
 │   ├── bot/create-client.ts   # Discord 클라이언트와 이벤트 처리
 │   ├── commands/test.ts       # 기능 선택 옵션과 다섯 테스트 기능
-│   ├── commands/wordle.ts     # Wordle 슬래시 명령어와 패널 갱신
+│   ├── commands/wordle.ts     # Wordle 공개 API
+│   ├── commands/wordle/       # 명령어, 버튼, 모달, 공개 현황 및 UI 구성
 │   ├── features/wordle/       # 게임 규칙, 외부 API, 세션 및 패널
 │   ├── config/env.ts          # 환경 변수 검증
 │   ├── types/command.ts       # 공통 명령어 타입
