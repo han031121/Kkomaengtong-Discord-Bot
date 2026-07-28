@@ -52,7 +52,7 @@ interface PersistedWordleGame {
     status: string;
 }
 
-interface PersistedRecentPlayer {
+interface PersistedRecentPlayer extends PersistedWordleGame {
     user_id: string;
     last_activity_order: number;
 }
@@ -125,24 +125,13 @@ function parseGameStatus(value: string): GameStatus {
 }
 
 export class WordleSessionStore {
-    private readonly games = new Map<string, WordleGame>();
     private readonly serverStates = new Map<string, WordleServerState>();
-    private readonly participantActivityOrders = new Map<string, number>();
-    private readonly publicStatusPanels = new Map<string, WordlePublicStatusPanel>();
-    private readonly database: DatabaseSync | undefined;
-    private nextActivityOrder = 1;
+    private readonly database: DatabaseSync;
     private databaseClosed = false;
 
     public constructor(options: WordleSessionStoreOptions = {}) {
-        if (options.databasePath === undefined) {
-            this.database = undefined;
-            return;
-        }
-
-        const databasePath =
-            options.databasePath === ":memory:"
-                ? options.databasePath
-                : resolve(options.databasePath);
+        const requestedPath = options.databasePath ?? ":memory:";
+        const databasePath = requestedPath === ":memory:" ? requestedPath : resolve(requestedPath);
 
         if (databasePath !== ":memory:") {
             mkdirSync(dirname(databasePath), { recursive: true });
@@ -219,15 +208,13 @@ export class WordleSessionStore {
     }
 
     public get(userId: string, printDate: string, guildId: string): WordleSession | undefined {
-        const gameKey = this.createGameKey(userId, printDate);
-        const game = this.games.get(gameKey) ?? this.loadGame(userId, printDate);
+        const game = this.loadGame(userId, printDate);
 
         if (game === undefined) {
             return undefined;
         }
 
-        this.games.set(gameKey, game);
-        const serverState = this.serverStates.get(this.createServerKey(gameKey, guildId));
+        const serverState = this.serverStates.get(this.createServerKey(userId, printDate, guildId));
 
         return {
             game,
@@ -239,36 +226,14 @@ export class WordleSessionStore {
     }
 
     public set(userId: string, printDate: string, guildId: string, session: WordleSession): void {
-        const gameKey = this.createGameKey(userId, printDate);
-
         this.saveGame(userId, printDate, session.game);
-        this.storeSessionInMemory(gameKey, guildId, session);
+        this.storeServerState(userId, printDate, guildId, session);
     }
 
     public registerGuildParticipant(userId: string, printDate: string, guildId: string): number {
-        let activityOrder: number;
-
-        if (this.database === undefined) {
-            activityOrder = this.nextActivityOrder;
-            this.nextActivityOrder += 1;
-        } else {
-            this.database.exec("BEGIN IMMEDIATE");
-
-            try {
-                activityOrder = this.saveGuildParticipantActivity(userId, printDate, guildId);
-                this.database.exec("COMMIT");
-            } catch (error) {
-                this.database.exec("ROLLBACK");
-                throw error;
-            }
-        }
-
-        this.participantActivityOrders.set(
-            this.createParticipantKey(guildId, printDate, userId),
-            activityOrder,
+        return this.runTransaction(() =>
+            this.saveGuildParticipantActivity(userId, printDate, guildId),
         );
-
-        return activityOrder;
     }
 
     public recordValidGuess(
@@ -277,44 +242,12 @@ export class WordleSessionStore {
         guildId: string,
         session: WordleSession,
     ): number {
-        const gameKey = this.createGameKey(userId, printDate);
-        let activityOrder: number;
+        const activityOrder = this.runTransaction(() => {
+            this.saveGame(userId, printDate, session.game);
+            return this.saveGuildParticipantActivity(userId, printDate, guildId);
+        });
 
-        if (this.database === undefined) {
-            activityOrder = this.nextActivityOrder;
-            this.nextActivityOrder += 1;
-        } else {
-            this.database.exec("BEGIN IMMEDIATE");
-
-            try {
-                this.saveGame(userId, printDate, session.game);
-                const result = this.database
-                    .prepare(
-                        `
-                            INSERT INTO wordle_input_activity (guild_id, print_date, user_id)
-                            VALUES (?, ?, ?)
-                        `,
-                    )
-                    .run(guildId, printDate, userId);
-
-                if (!Number.isSafeInteger(Number(result.lastInsertRowid))) {
-                    throw new Error("SQLite에 Wordle 입력 활동을 기록하지 못했습니다.");
-                }
-
-                activityOrder = this.saveGuildParticipantActivity(userId, printDate, guildId);
-                this.database.exec("COMMIT");
-            } catch (error) {
-                this.database.exec("ROLLBACK");
-                throw error;
-            }
-        }
-
-        this.participantActivityOrders.set(
-            this.createParticipantKey(guildId, printDate, userId),
-            activityOrder,
-        );
-        this.storeSessionInMemory(gameKey, guildId, session);
-
+        this.storeServerState(userId, printDate, guildId, session);
         return activityOrder;
     }
 
@@ -327,45 +260,17 @@ export class WordleSessionStore {
             throw new RangeError("최근 Wordle 사용자 조회 수는 1 이상의 정수여야 합니다.");
         }
 
-        if (this.database === undefined) {
-            const recentPlayers = [...this.participantActivityOrders.entries()]
-                .flatMap(([key, activityOrder]) => {
-                    const parsedKey = this.parseParticipantKey(key);
-
-                    if (
-                        parsedKey === undefined ||
-                        parsedKey.guildId !== guildId ||
-                        parsedKey.printDate !== printDate
-                    ) {
-                        return [];
-                    }
-
-                    const game = this.games.get(
-                        this.createGameKey(parsedKey.userId, parsedKey.printDate),
-                    );
-
-                    return game === undefined
-                        ? []
-                        : [
-                              {
-                                  userId: parsedKey.userId,
-                                  game,
-                                  activityOrder,
-                              },
-                          ];
-                })
-                .sort((left, right) => right.activityOrder - left.activityOrder);
-
-            return {
-                players: recentPlayers.slice(0, limit),
-                totalPlayers: recentPlayers.length,
-            };
-        }
-
         const rows = this.database
             .prepare(
                 `
-                    SELECT participant.user_id, participant.last_activity_order
+                    SELECT
+                        participant.user_id,
+                        participant.last_activity_order,
+                        game.puzzle_id,
+                        game.solution,
+                        game.puzzle_number,
+                        game.guesses_json,
+                        game.status
                     FROM wordle_guild_participants AS participant
                     INNER JOIN wordle_games AS game
                         ON game.user_id = participant.user_id
@@ -388,19 +293,15 @@ export class WordleSessionStore {
                 `,
             )
             .get(guildId, printDate) as unknown as PersistedPlayerCount;
-        const players = rows.map((row) => {
-            const gameKey = this.createGameKey(row.user_id, printDate);
-            const game = this.games.get(gameKey) ?? this.loadGame(row.user_id, printDate);
 
-            if (game === undefined || !Number.isSafeInteger(row.last_activity_order)) {
+        const players = rows.map((row) => {
+            if (!Number.isSafeInteger(row.last_activity_order)) {
                 throw new Error("SQLite에 저장된 Wordle 참여 활동 순서 정보가 올바르지 않습니다.");
             }
 
-            this.games.set(gameKey, game);
-
             return {
                 userId: row.user_id,
-                game,
+                game: this.parseGame(row, printDate),
                 activityOrder: row.last_activity_order,
             };
         });
@@ -419,13 +320,6 @@ export class WordleSessionStore {
         guildId: string,
         channelId: string,
     ): WordlePublicStatusPanel | undefined {
-        const panelKey = this.createPublicStatusPanelKey(guildId, channelId);
-        const inMemoryPanel = this.publicStatusPanels.get(panelKey);
-
-        if (inMemoryPanel !== undefined || this.database === undefined) {
-            return inMemoryPanel;
-        }
-
         const row = this.database
             .prepare(
                 `
@@ -440,22 +334,13 @@ export class WordleSessionStore {
             return undefined;
         }
 
-        const panel = this.parsePublicStatusPanel(row);
-        this.publicStatusPanels.set(panelKey, panel);
-
-        return panel;
+        return this.parsePublicStatusPanel(row);
     }
 
     public listPublicStatusPanels(
         guildId: string,
         printDate: string,
     ): readonly WordlePublicStatusPanel[] {
-        if (this.database === undefined) {
-            return [...this.publicStatusPanels.values()].filter(
-                (panel) => panel.guildId === guildId && panel.printDate === printDate,
-            );
-        }
-
         const rows = this.database
             .prepare(
                 `
@@ -467,60 +352,41 @@ export class WordleSessionStore {
             )
             .all(guildId, printDate) as unknown as PersistedPublicStatusPanel[];
 
-        return rows.map((row) => {
-            const panel = this.parsePublicStatusPanel(row);
-            this.publicStatusPanels.set(
-                this.createPublicStatusPanelKey(panel.guildId, panel.channelId),
-                panel,
-            );
-
-            return panel;
-        });
+        return rows.map((row) => this.parsePublicStatusPanel(row));
     }
 
     public setPublicStatusPanel(panel: WordlePublicStatusPanel): void {
-        if (this.database !== undefined) {
-            this.database
-                .prepare(
-                    `
-                        INSERT INTO wordle_public_status_panels (
-                            guild_id,
-                            channel_id,
-                            message_id,
-                            print_date
-                        )
-                        VALUES (?, ?, ?, ?)
-                        ON CONFLICT (guild_id, channel_id) DO UPDATE SET
-                            message_id = excluded.message_id,
-                            print_date = excluded.print_date
-                    `,
-                )
-                .run(panel.guildId, panel.channelId, panel.messageId, panel.printDate);
-        }
-
-        this.publicStatusPanels.set(
-            this.createPublicStatusPanelKey(panel.guildId, panel.channelId),
-            panel,
-        );
+        this.database
+            .prepare(
+                `
+                    INSERT INTO wordle_public_status_panels (
+                        guild_id,
+                        channel_id,
+                        message_id,
+                        print_date
+                    )
+                    VALUES (?, ?, ?, ?)
+                    ON CONFLICT (guild_id, channel_id) DO UPDATE SET
+                        message_id = excluded.message_id,
+                        print_date = excluded.print_date
+                `,
+            )
+            .run(panel.guildId, panel.channelId, panel.messageId, panel.printDate);
     }
 
     public deletePublicStatusPanel(guildId: string, channelId: string): void {
-        if (this.database !== undefined) {
-            this.database
-                .prepare(
-                    `
-                        DELETE FROM wordle_public_status_panels
-                        WHERE guild_id = ? AND channel_id = ?
-                    `,
-                )
-                .run(guildId, channelId);
-        }
-
-        this.publicStatusPanels.delete(this.createPublicStatusPanelKey(guildId, channelId));
+        this.database
+            .prepare(
+                `
+                    DELETE FROM wordle_public_status_panels
+                    WHERE guild_id = ? AND channel_id = ?
+                `,
+            )
+            .run(guildId, channelId);
     }
 
     public close(): void {
-        if (this.database === undefined || this.databaseClosed) {
+        if (this.databaseClosed) {
             return;
         }
 
@@ -529,10 +395,6 @@ export class WordleSessionStore {
     }
 
     private loadGame(userId: string, printDate: string): WordleGame | undefined {
-        if (this.database === undefined) {
-            return undefined;
-        }
-
         const row = this.database
             .prepare(
                 `
@@ -547,6 +409,10 @@ export class WordleSessionStore {
             return undefined;
         }
 
+        return this.parseGame(row, printDate);
+    }
+
+    private parseGame(row: PersistedWordleGame, printDate: string): WordleGame {
         if (
             !Number.isSafeInteger(row.puzzle_id) ||
             !Number.isSafeInteger(row.puzzle_number) ||
@@ -568,10 +434,6 @@ export class WordleSessionStore {
     }
 
     private saveGame(userId: string, printDate: string, game: WordleGame): void {
-        if (this.database === undefined) {
-            return;
-        }
-
         this.database
             .prepare(
                 `
@@ -611,10 +473,6 @@ export class WordleSessionStore {
         printDate: string,
         guildId: string,
     ): number {
-        if (this.database === undefined) {
-            throw new Error("SQLite 없이 참여 활동 순서를 저장할 수 없습니다.");
-        }
-
         const row = this.database
             .prepare(
                 `
@@ -651,9 +509,26 @@ export class WordleSessionStore {
         return activityOrder;
     }
 
-    private storeSessionInMemory(gameKey: string, guildId: string, session: WordleSession): void {
-        this.games.set(gameKey, session.game);
-        this.serverStates.set(this.createServerKey(gameKey, guildId), {
+    private runTransaction<T>(operation: () => T): T {
+        this.database.exec("BEGIN IMMEDIATE");
+
+        try {
+            const result = operation();
+            this.database.exec("COMMIT");
+            return result;
+        } catch (error) {
+            this.database.exec("ROLLBACK");
+            throw error;
+        }
+    }
+
+    private storeServerState(
+        userId: string,
+        printDate: string,
+        guildId: string,
+        session: WordleSession,
+    ): void {
+        this.serverStates.set(this.createServerKey(userId, printDate, guildId), {
             panelMessage: session.panelMessage,
             privateResponseInteraction: session.privateResponseInteraction,
             privateResponseMessageId: session.privateResponseMessageId,
@@ -679,36 +554,7 @@ export class WordleSessionStore {
         };
     }
 
-    private createGameKey(userId: string, printDate: string): string {
-        return `${userId}:${printDate}`;
-    }
-
-    private createServerKey(gameKey: string, guildId: string): string {
-        return `${guildId}:${gameKey}`;
-    }
-
-    private createParticipantKey(guildId: string, printDate: string, userId: string): string {
-        return `${guildId}:${printDate}:${userId}`;
-    }
-
-    private parseParticipantKey(
-        key: string,
-    ): { guildId: string; printDate: string; userId: string } | undefined {
-        const [guildId, printDate, userId, extraPart] = key.split(":");
-
-        if (
-            guildId === undefined ||
-            printDate === undefined ||
-            userId === undefined ||
-            extraPart !== undefined
-        ) {
-            return undefined;
-        }
-
-        return { guildId, printDate, userId };
-    }
-
-    private createPublicStatusPanelKey(guildId: string, channelId: string): string {
-        return `${guildId}:${channelId}`;
+    private createServerKey(userId: string, printDate: string, guildId: string): string {
+        return `${guildId}:${userId}:${printDate}`;
     }
 }

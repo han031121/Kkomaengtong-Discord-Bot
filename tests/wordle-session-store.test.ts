@@ -250,6 +250,14 @@ describe("Wordle SQLite 세션 저장소", () => {
         firstStore.close();
 
         const legacyDatabase = new DatabaseSync(databasePath);
+        legacyDatabase
+            .prepare(
+                `
+                    INSERT INTO wordle_input_activity (guild_id, print_date, user_id)
+                    VALUES (?, ?, ?)
+                `,
+            )
+            .run(guildId, puzzle.printDate, userId);
         legacyDatabase.exec("DROP TABLE wordle_guild_participants");
         legacyDatabase.close();
 
