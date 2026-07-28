@@ -167,7 +167,27 @@ describe("Wordle 퍼즐 캐시", () => {
         expect(getPuzzle).toHaveBeenCalledTimes(11);
         expect(getPuzzle).toHaveBeenLastCalledWith("2026-07-23", { forceRefresh: true });
 
-        cache.stopDailyRefresh();
+        cache.stopRefreshes();
+    });
+
+    it("부팅 갱신은 시작 직후부터 10분 동안 매분 클라이언트를 강제 호출합니다", async () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date("2026-07-23T03:45:00.000Z"));
+
+        const getPuzzle = vi.fn().mockResolvedValue(cachedPuzzle);
+        const cache = new WordlePuzzleCache({ getPuzzle }, "Asia/Seoul", 0);
+
+        cache.startStartupRefresh();
+        await vi.advanceTimersByTimeAsync(0);
+
+        expect(getPuzzle).toHaveBeenCalledOnce();
+
+        await vi.advanceTimersByTimeAsync(600_000);
+
+        expect(getPuzzle).toHaveBeenCalledTimes(11);
+        expect(getPuzzle).toHaveBeenLastCalledWith("2026-07-23", { forceRefresh: true });
+
+        cache.stopRefreshes();
     });
 });
 

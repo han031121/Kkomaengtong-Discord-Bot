@@ -185,12 +185,22 @@ async function sendPublicStatusPanelMessage(
     });
 }
 
+async function fetchPublicStatusPanelMessage(
+    channel: SendableChannels,
+    messageId: string,
+): Promise<Message> {
+    return channel.messages.fetch({
+        message: messageId,
+        force: true,
+    });
+}
+
 async function deleteExistingPublicStatusMessage(
     channel: SendableChannels,
     panel: WordlePublicStatusPanel,
 ): Promise<void> {
     try {
-        const message = await channel.messages.fetch(panel.messageId);
+        const message = await fetchPublicStatusPanelMessage(channel, panel.messageId);
         await message.delete();
     } catch (error) {
         if (getDiscordErrorCode(error) === 10_008) {
@@ -302,7 +312,7 @@ async function accessWordlePublicStatusPanel(
         let message: Message;
 
         try {
-            message = await channel.messages.fetch(panel.messageId);
+            message = await fetchPublicStatusPanelMessage(channel, panel.messageId);
         } catch (error) {
             if (getDiscordErrorCode(error) !== 10_008) {
                 throw error;
@@ -376,7 +386,7 @@ async function refreshPublicStatusPanelMessage(
     }
 
     try {
-        const message = await channel.messages.fetch(panel.messageId);
+        const message = await fetchPublicStatusPanelMessage(channel, panel.messageId);
         await message.edit({
             content: null,
             embeds: [],

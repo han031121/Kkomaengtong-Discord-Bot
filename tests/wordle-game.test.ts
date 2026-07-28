@@ -11,7 +11,7 @@ import {
     createPrivateWordleContainer,
     createPublicWordleContainer,
     createWordlePublicStatusContainer,
-    getFoundAlphabetCount,
+    getFoundAlphabetCounts,
 } from "../src/features/wordle/panel.js";
 
 const puzzle: WordlePuzzle = {
@@ -122,7 +122,8 @@ describe("Wordle 공개 현황 패널", () => {
             components: [
                 {
                     type: 10,
-                    content: "<@12345678901234567> 🟨 · 1/6\n3개의 알파벳을 찾음",
+                    content:
+                        "<@12345678901234567> **진행 중** · **1/6**\n찾음: 🟨 2개 · 🟩 1개",
                 },
             ],
             accessory: {
@@ -135,7 +136,45 @@ describe("Wordle 공개 현황 패널", () => {
         expect(panelJson).toContain("최근 입력 순 1명 표시 · 전체 3명");
         expect(panelJson).not.toContain("alley");
         expect(panelJson).not.toContain("apple");
-        expect(getFoundAlphabetCount(game)).toBe(3);
+        expect(getFoundAlphabetCounts(game)).toEqual({
+            present: 2,
+            correct: 1,
+        });
+    });
+
+    it("알파벳이 노란색에서 초록색으로 바뀌면 초록색에만 집계합니다", () => {
+        const game = submitGuess(submitGuess(createWordleGame(puzzle), "plead"), "amply");
+
+        expect(getFoundAlphabetCounts(game)).toEqual({
+            present: 1,
+            correct: 3,
+        });
+    });
+
+    it("게임 상태를 성공, 실패, 진행 중 글자로 표시합니다", () => {
+        const playingGame = submitGuess(createWordleGame(puzzle), "alley");
+        const wonGame = submitGuess(createWordleGame(puzzle), "apple");
+        let lostGame = createWordleGame(puzzle);
+
+        for (let attempt = 0; attempt < 6; attempt += 1) {
+            lostGame = submitGuess(lostGame, "crane");
+        }
+
+        const panelJson = JSON.stringify(
+            createWordlePublicStatusContainer(
+                [
+                    { userId: "12345678901234561", game: wonGame },
+                    { userId: "12345678901234562", game: lostGame },
+                    { userId: "12345678901234563", game: playingGame },
+                ],
+                3,
+                puzzle.printDate,
+            ).toJSON(),
+        );
+
+        expect(panelJson).toContain("<@12345678901234561> **성공** · **1/6**");
+        expect(panelJson).toContain("<@12345678901234562> **실패** · **6/6**");
+        expect(panelJson).toContain("<@12345678901234563> **진행 중** · **1/6**");
     });
 
     it("한 패널에는 최대 8명만 허용합니다", () => {

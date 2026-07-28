@@ -7,6 +7,8 @@ const DAILY_REFRESH_INTERVAL_MS = 60_000;
 const DAILY_REFRESH_WINDOW_MS = 10 * 60_000;
 const MAX_DATE_CHANGE_SEARCH_MS = 48 * 60 * 60 * 1_000;
 
+type RefreshWindowKind = "startup" | "date-change";
+
 export interface WordlePuzzleRequestOptions {
     forceRefresh?: boolean;
 }
@@ -54,8 +56,9 @@ export function getMillisecondsUntilNextDateInTimeZone(now: Date, timeZone: stri
 
 export class WordlePuzzleCache {
     private cachedPuzzle: WordlePuzzle | undefined;
-    private refreshTimer: NodeJS.Timeout | undefined;
+    private readonly refreshTimers = new Set<NodeJS.Timeout>();
     private dailyRefreshStarted = false;
+    private startupRefreshStarted = false;
 
     public constructor(
         private readonly client: WordlePuzzleClient = new NytWordleClient(),
@@ -86,6 +89,15 @@ export class WordlePuzzleCache {
         );
     }
 
+    public startStartupRefresh(): void {
+        if (this.startupRefreshStarted) {
+            return;
+        }
+
+        this.startupRefreshStarted = true;
+        this.scheduleRefreshAttempt(Date.now(), 0, "startup");
+    }
+
     public startDailyRefresh(): void {
         if (this.dailyRefreshStarted) {
             return;
@@ -95,15 +107,19 @@ export class WordlePuzzleCache {
         this.scheduleNextDailyRefreshWindow();
     }
 
-    public stopDailyRefresh(): void {
+    public stopRefreshes(): void {
         this.dailyRefreshStarted = false;
+        this.startupRefreshStarted = false;
 
-        if (this.refreshTimer === undefined) {
-            return;
+        for (const refreshTimer of this.refreshTimers) {
+            clearTimeout(refreshTimer);
         }
 
-        clearTimeout(this.refreshTimer);
-        this.refreshTimer = undefined;
+        this.refreshTimers.clear();
+    }
+
+    public stopDailyRefresh(): void {
+        this.stopRefreshes();
     }
 
     private scheduleNextDailyRefreshWindow(): void {
@@ -116,44 +132,66 @@ export class WordlePuzzleCache {
             getMillisecondsUntilNextDateInTimeZone(new Date(), this.timeZone) +
             this.dailyRefreshStartOffsetMs;
 
-        this.scheduleRefreshAttempt(windowStartTimeMs, 0);
+        this.scheduleRefreshAttempt(windowStartTimeMs, 0, "date-change");
     }
 
-    private scheduleRefreshAttempt(windowStartTimeMs: number, attemptIndex: number): void {
-        if (!this.dailyRefreshStarted) {
+    private scheduleRefreshAttempt(
+        windowStartTimeMs: number,
+        attemptIndex: number,
+        refreshWindowKind: RefreshWindowKind,
+    ): void {
+        if (!this.isRefreshWindowActive(refreshWindowKind)) {
             return;
         }
 
         const attemptTimeMs = windowStartTimeMs + attemptIndex * this.dailyRefreshIntervalMs;
         const delayMs = Math.max(0, attemptTimeMs - Date.now());
-        this.refreshTimer = setTimeout(() => {
-            this.refreshTimer = undefined;
-            void this.refreshDuringDateChangeWindow(windowStartTimeMs, attemptIndex);
+        const refreshTimer = setTimeout(() => {
+            this.refreshTimers.delete(refreshTimer);
+            void this.refreshDuringWindow(windowStartTimeMs, attemptIndex, refreshWindowKind);
         }, delayMs);
+        this.refreshTimers.add(refreshTimer);
 
-        if (typeof this.refreshTimer.unref === "function") {
-            this.refreshTimer.unref();
+        if (typeof refreshTimer.unref === "function") {
+            refreshTimer.unref();
         }
     }
 
-    private async refreshDuringDateChangeWindow(
+    private async refreshDuringWindow(
         windowStartTimeMs: number,
         attemptIndex: number,
+        refreshWindowKind: RefreshWindowKind,
     ): Promise<void> {
         try {
             await this.refresh();
         } catch (error) {
-            console.error("날짜 변경 후 오늘의 NYT Wordle을 캐시하지 못했습니다.", error);
+            const failureContext = refreshWindowKind === "startup" ? "봇 시작 후" : "날짜 변경 후";
+            console.error(`${failureContext} 오늘의 NYT Wordle을 캐시하지 못했습니다.`, error);
         } finally {
-            const nextAttemptIndex = attemptIndex + 1;
-
-            if (nextAttemptIndex * this.dailyRefreshIntervalMs <= this.dailyRefreshWindowMs) {
-                this.scheduleRefreshAttempt(windowStartTimeMs, nextAttemptIndex);
+            if (!this.isRefreshWindowActive(refreshWindowKind)) {
                 return;
             }
 
-            this.scheduleNextDailyRefreshWindow();
+            const nextAttemptIndex = attemptIndex + 1;
+
+            if (nextAttemptIndex * this.dailyRefreshIntervalMs <= this.dailyRefreshWindowMs) {
+                this.scheduleRefreshAttempt(windowStartTimeMs, nextAttemptIndex, refreshWindowKind);
+                return;
+            }
+
+            if (refreshWindowKind === "date-change") {
+                this.scheduleNextDailyRefreshWindow();
+                return;
+            }
+
+            this.startupRefreshStarted = false;
         }
+    }
+
+    private isRefreshWindowActive(refreshWindowKind: RefreshWindowKind): boolean {
+        return refreshWindowKind === "startup"
+            ? this.startupRefreshStarted
+            : this.dailyRefreshStarted;
     }
 }
 
