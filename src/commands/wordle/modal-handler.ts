@@ -12,12 +12,13 @@ import {
     defaultWordleSessionStore,
     getWordleGuildId,
     parseWordleModal,
+    refreshOtherPrivateWordleStates,
     updatePrivateWordleState,
     WORDLE_GUESS_INPUT_ID,
     wordleUserLock,
 } from "./interaction-builders.js";
 import type { WordleGuessInteraction } from "./interaction-builders.js";
-import { refreshWordlePublicStatusPanels, updatePublicWordlePanel } from "./public-status.js";
+import { refreshSharedWordlePanels, refreshWordlePublicStatusPanels } from "./public-status.js";
 
 const localDictionary = new LocalDictionary();
 
@@ -66,24 +67,23 @@ export async function processWordleGuess(
         game: updatedGame,
     };
     store.recordValidGuess(interaction.user.id, printDate, guildId, sessionWithUpdatedGame);
-    const panelMessage =
-        currentSession.panelMessage === undefined
-            ? undefined
-            : await updatePublicWordlePanel(interaction, currentSession, updatedGame);
+    const panelMessage = await refreshSharedWordlePanels(interaction, updatedGame, store);
 
     const updatedSession: WordleSession = {
         ...sessionWithUpdatedGame,
         panelMessage,
     };
     store.set(interaction.user.id, printDate, guildId, updatedSession);
-    await refreshWordlePublicStatusPanels(interaction, printDate, store);
-
     await updatePrivateWordleState(
         interaction,
         updatedSession,
         createProgressResponse(updatedGame),
         store,
     );
+    await Promise.all([
+        refreshOtherPrivateWordleStates(interaction, updatedGame, store),
+        refreshWordlePublicStatusPanels(interaction, printDate, store),
+    ]);
 }
 
 export async function handleWordleModal(

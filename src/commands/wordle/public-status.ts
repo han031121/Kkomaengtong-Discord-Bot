@@ -356,19 +356,110 @@ export async function refreshWordlePublicStatusPanels(
     printDate: string,
     store: WordleSessionStore = defaultWordleSessionStore,
 ): Promise<void> {
-    const guildId = getWordleGuildId(interaction);
+    const currentGuildId = getWordleGuildId(interaction);
+    const guildIds = store.listParticipantGuildIds(interaction.user.id, printDate);
 
-    if (store.listPublicStatusPanels(guildId, printDate).length === 0) {
-        return;
+    await Promise.all(
+        guildIds.map(async (guildId) => {
+            if (store.listPublicStatusPanels(guildId, printDate).length === 0) {
+                return;
+            }
+
+            try {
+                await publicStatusPanelLock.runExclusive(guildId, async () => {
+                    const panels = store.listPublicStatusPanels(guildId, printDate);
+
+                    for (const panel of panels) {
+                        await refreshPublicStatusPanelMessage(interaction, panel, store);
+                    }
+                });
+            } catch (error) {
+                if (guildId === currentGuildId) {
+                    throw error;
+                }
+
+                console.warn("다른 서버의 Wordle 공개 게임 현황을 갱신하지 못했습니다.", error);
+            }
+        }),
+    );
+}
+
+async function updateSharedWordlePanel(
+    interaction: WordleInteraction,
+    panelMessage: Message,
+    game: WordleGame,
+): Promise<Message> {
+    if (!panelMessage.editable) {
+        console.warn("다른 서버의 기존 Wordle 패널을 수정할 수 없습니다.");
+        return panelMessage;
     }
 
-    await publicStatusPanelLock.runExclusive(guildId, async () => {
-        const panels = store.listPublicStatusPanels(guildId, printDate);
+    try {
+        return await panelMessage.edit({
+            content: null,
+            embeds: [],
+            components: [createPublicPanel(interaction, game)],
+            flags: MessageFlags.IsComponentsV2,
+            allowedMentions: { users: [interaction.user.id] },
+        });
+    } catch (error) {
+        const errorCode = getDiscordErrorCode(error);
 
-        for (const panel of panels) {
-            await refreshPublicStatusPanelMessage(interaction, panel, store);
+        if (errorCode === undefined || !RECOVERABLE_PANEL_ERROR_CODES.has(errorCode)) {
+            throw error;
         }
-    });
+
+        console.warn(
+            `다른 서버의 Wordle 패널을 수정하지 못했습니다. Discord 오류 코드: ${errorCode}`,
+        );
+        return panelMessage;
+    }
+}
+
+export async function refreshSharedWordlePanels(
+    interaction: WordleInteraction,
+    game: WordleGame,
+    store: WordleSessionStore,
+): Promise<Message | undefined> {
+    const currentGuildId = getWordleGuildId(interaction);
+    let currentPanelMessage: Message | undefined;
+
+    for (const guildId of store.listServerGuildIds(interaction.user.id, game.puzzle.printDate)) {
+        const session = store.get(interaction.user.id, game.puzzle.printDate, guildId);
+
+        if (session?.panelMessage === undefined) {
+            continue;
+        }
+
+        let updatedMessage: Message;
+
+        try {
+            updatedMessage =
+                guildId === currentGuildId
+                    ? await updatePublicWordlePanel(interaction, session, game)
+                    : await updateSharedWordlePanel(interaction, session.panelMessage, game);
+        } catch (error) {
+            if (guildId === currentGuildId) {
+                throw error;
+            }
+
+            console.warn("다른 서버의 Wordle 현재 상태 공유창을 갱신하지 못했습니다.", error);
+            continue;
+        }
+
+        store.setSharedPanelMessage(
+            interaction.user.id,
+            game.puzzle.printDate,
+            guildId,
+            updatedMessage,
+        );
+
+        if (guildId === currentGuildId) {
+            currentPanelMessage = updatedMessage;
+        }
+    }
+
+    return currentPanelMessage;
 }
 
 export async function updatePublicWordlePanel(

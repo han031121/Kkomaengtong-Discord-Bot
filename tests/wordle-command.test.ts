@@ -820,32 +820,68 @@ describe("Wordle 서버별 진행 상태", () => {
         expect(serializedPrivatePanel).toContain("`CRANE`");
     });
 
-    it("한 서버의 단어 입력은 공통 게임에 반영하고 해당 서버의 공개 패널만 수정합니다", async () => {
+    it("다른 서버의 단어 입력을 모든 활성 화면과 공개 게임 현황에 반영합니다", async () => {
         const userId = "72345678901234567";
         const otherGuildId = "82345678901234567";
+        const statusChannelId = "92345678901234567";
+        const statusMessageId = "93345678901234567";
         const store = new WordleSessionStore();
-        const currentGuildPanel = {
+        const sharedStateMessage = {
             editable: true,
         } as Message;
-        const otherGuildPanel = {
-            editable: true,
-        } as Message;
-        const currentGuildPanelEdit = vi.fn().mockResolvedValue(currentGuildPanel);
-        const otherGuildPanelEdit = vi.fn().mockResolvedValue(otherGuildPanel);
-        Object.assign(currentGuildPanel, { edit: currentGuildPanelEdit });
-        Object.assign(otherGuildPanel, { edit: otherGuildPanelEdit });
-        const createSession = (panelMessage: Message): WordleSession => ({
+        const sharedStateEdit = vi.fn().mockResolvedValue(sharedStateMessage);
+        const privateStateEdit = vi.fn().mockResolvedValue({
+            id: "current-guild-private-message",
+        });
+        const statusMessageEdit = vi.fn().mockResolvedValue(undefined);
+        const statusMessageFetch = vi.fn().mockResolvedValue({
+            edit: statusMessageEdit,
+        });
+        const statusChannel = {
+            isSendable: () => true,
+            messages: {
+                fetch: statusMessageFetch,
+            },
+        };
+        Object.assign(sharedStateMessage, { edit: sharedStateEdit });
+        const currentGuildSession: WordleSession = {
             game: createWordleGame(puzzle),
-            panelMessage,
+            panelMessage: sharedStateMessage,
+            privateResponseInteraction: {
+                guildId,
+                id: "current-guild-command",
+                editReply: privateStateEdit,
+                user: {
+                    id: userId,
+                },
+            } as unknown as ChatInputCommandInteraction,
+            privateResponseMessageId: "current-guild-private-message",
+            resultShared: false,
+        };
+        const otherGuildSession: WordleSession = {
+            game: createWordleGame(puzzle),
+            panelMessage: undefined,
             privateResponseInteraction: undefined,
             privateResponseMessageId: undefined,
             resultShared: false,
+        };
+        store.set(userId, puzzle.printDate, guildId, currentGuildSession);
+        store.set(userId, puzzle.printDate, otherGuildId, otherGuildSession);
+        store.registerGuildParticipant(userId, puzzle.printDate, guildId);
+        store.setPublicStatusPanel({
+            guildId,
+            channelId: statusChannelId,
+            messageId: statusMessageId,
+            printDate: puzzle.printDate,
         });
-        store.set(userId, puzzle.printDate, guildId, createSession(currentGuildPanel));
-        store.set(userId, puzzle.printDate, otherGuildId, createSession(otherGuildPanel));
 
         const interaction = {
             customId: `wordle:guess-modal:${puzzle.printDate}:${userId}`,
+            client: {
+                channels: {
+                    fetch: vi.fn().mockResolvedValue(statusChannel),
+                },
+            },
             deferUpdate: vi.fn().mockResolvedValue(undefined),
             editReply: vi.fn().mockResolvedValue({
                 id: "other-guild-private-message",
@@ -866,8 +902,13 @@ describe("Wordle 서버별 진행 상태", () => {
 
         await handleWordleModal(interaction, store, dictionary);
 
-        expect(currentGuildPanelEdit).not.toHaveBeenCalled();
-        expect(otherGuildPanelEdit).toHaveBeenCalledOnce();
+        expect(sharedStateEdit).toHaveBeenCalledOnce();
+        expect(privateStateEdit).toHaveBeenCalledOnce();
+        expect(statusMessageFetch).toHaveBeenCalledWith({
+            message: statusMessageId,
+            force: true,
+        });
+        expect(statusMessageEdit).toHaveBeenCalledOnce();
         expect(
             store.get(userId, puzzle.printDate, guildId)?.game.guesses.map((guess) => guess.word),
         ).toEqual(["crane"]);
@@ -876,6 +917,89 @@ describe("Wordle 서버별 진행 상태", () => {
                 .get(userId, puzzle.printDate, otherGuildId)
                 ?.game.guesses.map((guess) => guess.word),
         ).toEqual(["crane"]);
+
+        const sharedStateUpdate = sharedStateEdit.mock.calls[0]?.[0] as {
+            components: { toJSON(): unknown }[];
+        };
+        const privateStateUpdate = privateStateEdit.mock.calls[0]?.[0] as {
+            components: { toJSON(): unknown }[];
+        };
+        const publicStatusUpdate = statusMessageEdit.mock.calls[0]?.[0] as {
+            components: { toJSON(): unknown }[];
+        };
+
+        expect(JSON.stringify(sharedStateUpdate.components[0]?.toJSON())).toContain(
+            "진행 중 · 1/6",
+        );
+        expect(JSON.stringify(privateStateUpdate.components[0]?.toJSON())).toContain("`CRANE`");
+        expect(JSON.stringify(publicStatusUpdate.components[0]?.toJSON())).toContain(
+            `<@${userId}> **진행 중** · **1/6**`,
+        );
+    });
+
+    it("다른 서버의 비공개 메시지가 만료되어도 현재 서버의 게임 진행을 유지합니다", async () => {
+        const userId = "74345678901234567";
+        const otherGuildId = "84345678901234567";
+        const store = new WordleSessionStore();
+        const expiredPrivateEdit = vi.fn().mockRejectedValue({
+            code: 10_015,
+        });
+        const session: WordleSession = {
+            game: createWordleGame(puzzle),
+            panelMessage: undefined,
+            privateResponseInteraction: {
+                guildId,
+                id: "expired-private-interaction",
+                editReply: expiredPrivateEdit,
+                user: {
+                    id: userId,
+                },
+            } as unknown as ChatInputCommandInteraction,
+            privateResponseMessageId: "expired-private-message",
+            resultShared: false,
+        };
+        store.set(userId, puzzle.printDate, guildId, session);
+        store.set(userId, puzzle.printDate, otherGuildId, {
+            ...session,
+            privateResponseInteraction: undefined,
+            privateResponseMessageId: undefined,
+        });
+
+        const currentPrivateEdit = vi.fn().mockResolvedValue({
+            id: "other-guild-private-message",
+        });
+        const interaction = {
+            customId: `wordle:guess-modal:${puzzle.printDate}:${userId}`,
+            deferUpdate: vi.fn().mockResolvedValue(undefined),
+            editReply: currentPrivateEdit,
+            fields: {
+                getTextInputValue: () => "crane",
+            },
+            guildId: otherGuildId,
+            id: "other-guild-modal",
+            user: {
+                id: userId,
+                displayAvatarURL: () => "https://cdn.example.com/avatar.png",
+            },
+        } as unknown as ModalSubmitInteraction;
+
+        await handleWordleModal(interaction, store, {
+            isEnglishWord: vi.fn().mockReturnValue(true),
+        });
+
+        expect(expiredPrivateEdit).toHaveBeenCalledOnce();
+        expect(currentPrivateEdit).toHaveBeenCalledOnce();
+        expect(store.get(userId, puzzle.printDate, guildId)).toMatchObject({
+            game: {
+                guesses: [
+                    {
+                        word: "crane",
+                    },
+                ],
+            },
+            privateResponseInteraction: undefined,
+            privateResponseMessageId: undefined,
+        });
     });
 });
 

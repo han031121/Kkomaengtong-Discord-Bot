@@ -372,3 +372,51 @@ export async function updatePrivateWordleState(
         privateResponseMessageId: privateResponseMessage.id,
     });
 }
+
+export async function refreshOtherPrivateWordleStates(
+    interaction: WordleInteraction,
+    game: WordleGame,
+    store: WordleSessionStore,
+): Promise<void> {
+    const currentGuildId = getWordleGuildId(interaction);
+
+    for (const guildId of store.listServerGuildIds(interaction.user.id, game.puzzle.printDate)) {
+        if (guildId === currentGuildId) {
+            continue;
+        }
+
+        const session = store.get(interaction.user.id, game.puzzle.printDate, guildId);
+        const privateInteraction = session?.privateResponseInteraction;
+
+        if (session === undefined || privateInteraction === undefined) {
+            continue;
+        }
+
+        const updatedSession = {
+            ...session,
+            game,
+        };
+
+        try {
+            await updatePrivateWordleState(
+                privateInteraction,
+                updatedSession,
+                createProgressResponse(game),
+                store,
+            );
+        } catch (error) {
+            const errorCode = getDiscordErrorCode(error);
+
+            if (errorCode === 10_008 || errorCode === 10_015 || errorCode === 50_027) {
+                store.set(interaction.user.id, game.puzzle.printDate, guildId, {
+                    ...updatedSession,
+                    privateResponseInteraction: undefined,
+                    privateResponseMessageId: undefined,
+                });
+                continue;
+            }
+
+            console.warn("다른 서버의 Wordle 비공개 메시지를 갱신하지 못했습니다.", error);
+        }
+    }
+}

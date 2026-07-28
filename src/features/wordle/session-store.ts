@@ -22,6 +22,12 @@ export interface WordleSession {
 
 type WordleServerState = Omit<WordleSession, "game">;
 
+interface StoredWordleServerState extends WordleServerState {
+    guildId: string;
+    printDate: string;
+    userId: string;
+}
+
 export interface WordleSessionStoreOptions {
     databasePath?: string;
 }
@@ -59,6 +65,10 @@ interface PersistedRecentPlayer extends PersistedWordleGame {
 
 interface PersistedPlayerCount {
     player_count: number;
+}
+
+interface PersistedGuildId {
+    guild_id: string;
 }
 
 interface PersistedPublicStatusPanel {
@@ -125,7 +135,7 @@ function parseGameStatus(value: string): GameStatus {
 }
 
 export class WordleSessionStore {
-    private readonly serverStates = new Map<string, WordleServerState>();
+    private readonly serverStates = new Map<string, StoredWordleServerState>();
     private readonly database: DatabaseSync;
     private databaseClosed = false;
 
@@ -249,6 +259,46 @@ export class WordleSessionStore {
 
         this.storeServerState(userId, printDate, guildId, session);
         return activityOrder;
+    }
+
+    public listServerGuildIds(userId: string, printDate: string): readonly string[] {
+        return [...this.serverStates.values()]
+            .filter((state) => state.userId === userId && state.printDate === printDate)
+            .map((state) => state.guildId);
+    }
+
+    public listParticipantGuildIds(userId: string, printDate: string): readonly string[] {
+        const rows = this.database
+            .prepare(
+                `
+                    SELECT guild_id
+                    FROM wordle_guild_participants
+                    WHERE user_id = ? AND print_date = ?
+                    ORDER BY guild_id
+                `,
+            )
+            .all(userId, printDate) as unknown as PersistedGuildId[];
+
+        return rows.map((row) => row.guild_id);
+    }
+
+    public setSharedPanelMessage(
+        userId: string,
+        printDate: string,
+        guildId: string,
+        message: Message,
+    ): void {
+        const key = this.createServerKey(userId, printDate, guildId);
+        const state = this.serverStates.get(key);
+
+        if (state === undefined) {
+            return;
+        }
+
+        this.serverStates.set(key, {
+            ...state,
+            panelMessage: message,
+        });
     }
 
     public getRecentPlayers(
@@ -529,10 +579,13 @@ export class WordleSessionStore {
         session: WordleSession,
     ): void {
         this.serverStates.set(this.createServerKey(userId, printDate, guildId), {
+            guildId,
             panelMessage: session.panelMessage,
+            printDate,
             privateResponseInteraction: session.privateResponseInteraction,
             privateResponseMessageId: session.privateResponseMessageId,
             resultShared: session.resultShared,
+            userId,
         });
     }
 
