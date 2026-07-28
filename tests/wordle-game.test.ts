@@ -122,8 +122,7 @@ describe("Wordle 공개 현황 패널", () => {
             components: [
                 {
                     type: 10,
-                    content:
-                        "<@12345678901234567> **진행 중** · **1/6**\n찾음: 🟨 2개 · 🟩 1개",
+                    content: "<@12345678901234567> **진행 중** · **1/6**\n찾음: 🟨 2개 · 🟩 1개",
                 },
             ],
             accessory: {
@@ -133,7 +132,7 @@ describe("Wordle 공개 현황 패널", () => {
                 style: 2,
             },
         });
-        expect(panelJson).toContain("최근 입력 순 1명 표시 · 전체 3명");
+        expect(panelJson).toContain("최근 활동 순 1명 표시 · 전체 3명");
         expect(panelJson).not.toContain("alley");
         expect(panelJson).not.toContain("apple");
         expect(getFoundAlphabetCounts(game)).toEqual({

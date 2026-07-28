@@ -107,12 +107,25 @@ describe("Wordle 공개 메시지 전송", () => {
             },
         } as unknown as ChatInputCommandInteraction;
         const puzzleProvider = createPuzzleProvider();
+        const store = new WordleSessionStore();
 
-        await createWordleCommand(new WordleSessionStore(), puzzleProvider).execute(interaction);
+        await createWordleCommand(store, puzzleProvider).execute(interaction);
 
         expect(puzzleProvider.getTodaysPuzzle).toHaveBeenCalledOnce();
         expect(send).not.toHaveBeenCalled();
         expect(editReply).toHaveBeenCalledOnce();
+        expect(store.getRecentPlayers(guildId, puzzle.printDate, 8)).toMatchObject({
+            totalPlayers: 1,
+            players: [
+                {
+                    userId,
+                    activityOrder: 1,
+                    game: {
+                        guesses: [],
+                    },
+                },
+            ],
+        });
 
         const privateResponse = editReply.mock.calls[0]?.[0] as {
             components: { toJSON(): unknown }[];
@@ -178,6 +191,57 @@ describe("Wordle 공개 메시지 전송", () => {
         } finally {
             dictionaryRequest.mockRestore();
         }
+    });
+
+    it("/워들만 실행해도 기존 공개 현황 패널에 참여 상태를 즉시 반영합니다", async () => {
+        const userId = "34345678901234567";
+        const channelId = "44345678901234567";
+        const statusMessageId = "54345678901234567";
+        const statusMessageEdit = vi.fn().mockResolvedValue(undefined);
+        const statusMessage = {
+            edit: statusMessageEdit,
+        };
+        const store = new WordleSessionStore();
+        store.setPublicStatusPanel({
+            guildId,
+            channelId,
+            messageId: statusMessageId,
+            printDate: puzzle.printDate,
+        });
+        const interaction = {
+            id: "command-with-existing-status-panel",
+            deferred: true,
+            deferReply: vi.fn().mockResolvedValue(undefined),
+            editReply: vi.fn().mockResolvedValue({
+                id: "private-message",
+            }),
+            channel: {
+                isSendable: () => true,
+                messages: {
+                    fetch: vi.fn().mockResolvedValue(statusMessage),
+                },
+            },
+            channelId,
+            guildId,
+            options: {
+                getString: () => null,
+            },
+            user: {
+                id: userId,
+                displayAvatarURL: () => "https://cdn.example.com/avatar.png",
+            },
+        } as unknown as ChatInputCommandInteraction;
+
+        await createWordleCommand(store, createPuzzleProvider()).execute(interaction);
+
+        expect(statusMessageEdit).toHaveBeenCalledOnce();
+        const statusUpdate = statusMessageEdit.mock.calls[0]?.[0] as {
+            components: { toJSON(): unknown }[];
+        };
+        const serializedStatus = JSON.stringify(statusUpdate.components[0]?.toJSON());
+
+        expect(serializedStatus).toContain(`<@${userId}> **진행 중** · **0/6**`);
+        expect(serializedStatus).toContain("최근 활동 순 1명 표시 · 전체 1명");
     });
 
     it("/워들 실행 시 오늘 퍼즐 캐시가 없으면 안내 메시지만 표시합니다", async () => {
@@ -714,6 +778,21 @@ describe("Wordle 서버별 진행 상태", () => {
         ).toEqual(["crane"]);
         expect(store.get(userId, puzzle.printDate, otherGuildId)?.panelMessage).toBeUndefined();
         expect(store.get(userId, puzzle.printDate, guildId)?.game.guesses).toHaveLength(1);
+        expect(store.getRecentPlayers(otherGuildId, puzzle.printDate, 8)).toMatchObject({
+            totalPlayers: 1,
+            players: [
+                {
+                    userId,
+                    game: {
+                        guesses: [
+                            {
+                                word: "crane",
+                            },
+                        ],
+                    },
+                },
+            ],
+        });
 
         const otherGuildPrivateUpdate = otherGuild.editReply.mock.calls[0]?.[0] as {
             components: { toJSON(): unknown }[];
@@ -1450,7 +1529,7 @@ describe("Wordle 모달 입력", () => {
         expect(editReply).toHaveBeenCalledOnce();
     });
 
-    it("유효한 단어 입력은 입력 순번을 기록하고 공개 현황 패널을 수정합니다", async () => {
+    it("유효한 단어 입력은 활동 순번을 기록하고 공개 현황 패널을 수정합니다", async () => {
         const userId = "12345678901234567";
         const channelId = "32345678901234567";
         const statusMessageId = "42345678901234567";
@@ -1514,7 +1593,7 @@ describe("Wordle 모달 입력", () => {
             players: [
                 {
                     userId,
-                    inputOrder: 1,
+                    activityOrder: 1,
                 },
             ],
         });

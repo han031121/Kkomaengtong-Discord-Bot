@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 
 import type { Message } from "discord.js";
 import { afterEach, describe, expect, it } from "vitest";
@@ -138,7 +139,7 @@ describe("Wordle SQLite 세션 저장소", () => {
         expect(restartedStore.get(otherUserId, puzzle.printDate, guildId)?.game).toEqual(otherGame);
     });
 
-    it("유효한 단어 입력 순번으로 최근 사용자 8명을 정확하게 정렬합니다", () => {
+    it("최근 활동 순번으로 사용자 8명을 정확하게 정렬합니다", () => {
         const store = new WordleSessionStore();
         stores.push(store);
         const userIds = Array.from({ length: 9 }, (_, index) => `1234567890123456${index}`);
@@ -158,7 +159,7 @@ describe("Wordle SQLite 세션 저장소", () => {
         const firstUserId = userIds[0];
 
         if (firstUserId === undefined) {
-            throw new Error("최근 입력 순서를 갱신할 사용자가 없습니다.");
+            throw new Error("최근 활동 순서를 갱신할 사용자가 없습니다.");
         }
 
         const updatedGame = submitGuess(
@@ -172,7 +173,31 @@ describe("Wordle SQLite 세션 저장소", () => {
         );
     });
 
-    it("입력 순번과 채널별 공개 현황 메시지를 재시작 후에도 복원합니다", () => {
+    it("단어 입력 없이 등록한 서버 참여자를 upsert하고 재시작 후에도 조회합니다", () => {
+        const databasePath = createDatabasePath();
+        const firstStore = openStore(databasePath);
+        const game = createWordleGame(puzzle);
+
+        firstStore.set(userId, puzzle.printDate, guildId, createSession(game));
+        firstStore.registerGuildParticipant(userId, puzzle.printDate, guildId);
+        firstStore.registerGuildParticipant(userId, puzzle.printDate, guildId);
+        firstStore.close();
+
+        const restartedStore = openStore(databasePath);
+
+        expect(restartedStore.getRecentPlayers(guildId, puzzle.printDate, 8)).toMatchObject({
+            totalPlayers: 1,
+            players: [
+                {
+                    userId,
+                    game,
+                    activityOrder: 2,
+                },
+            ],
+        });
+    });
+
+    it("서버 참여 활동 순번과 채널별 공개 현황 메시지를 재시작 후에도 복원합니다", () => {
         const databasePath = createDatabasePath();
         const firstStore = openStore(databasePath);
         const game = submitGuess(createWordleGame(puzzle), "crane");
@@ -196,7 +221,7 @@ describe("Wordle SQLite 세션 저장소", () => {
                 {
                     userId,
                     game,
-                    inputOrder: 1,
+                    activityOrder: 1,
                 },
             ],
         });
@@ -214,5 +239,31 @@ describe("Wordle SQLite 세션 저장소", () => {
                 printDate: puzzle.printDate,
             },
         ]);
+    });
+
+    it("기존 입력 활동을 서버 참여자로 자동 이관합니다", () => {
+        const databasePath = createDatabasePath();
+        const firstStore = openStore(databasePath);
+        const game = submitGuess(createWordleGame(puzzle), "crane");
+
+        firstStore.recordValidGuess(userId, puzzle.printDate, guildId, createSession(game));
+        firstStore.close();
+
+        const legacyDatabase = new DatabaseSync(databasePath);
+        legacyDatabase.exec("DROP TABLE wordle_guild_participants");
+        legacyDatabase.close();
+
+        const migratedStore = openStore(databasePath);
+
+        expect(migratedStore.getRecentPlayers(guildId, puzzle.printDate, 8)).toMatchObject({
+            totalPlayers: 1,
+            players: [
+                {
+                    userId,
+                    game,
+                    activityOrder: 1,
+                },
+            ],
+        });
     });
 });

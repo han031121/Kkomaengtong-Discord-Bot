@@ -118,14 +118,14 @@ export function createWordlePublicStatusContainer(
             new TextDisplayBuilder().setContent(
                 [
                     "### 오늘의 Wordle 현황",
-                    `-# 최근 입력 순 ${entries.length}명 표시 · 전체 ${totalPlayers}명 · ${printDate}`,
+                    `-# 최근 활동 순 ${entries.length}명 표시 · 전체 ${totalPlayers}명 · ${printDate}`,
                 ].join("\n"),
             ),
         );
 
     if (entries.length === 0) {
         return container.addTextDisplayComponents(
-            new TextDisplayBuilder().setContent("아직 유효한 단어를 입력한 사용자가 없습니다."),
+            new TextDisplayBuilder().setContent("아직 Wordle에 참여한 사용자가 없습니다."),
         );
     }
 

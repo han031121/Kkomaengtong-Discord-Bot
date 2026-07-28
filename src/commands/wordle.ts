@@ -869,6 +869,17 @@ function createNewWordleSession(game: WordleGame): WordleSession {
     };
 }
 
+async function registerWordleCommandParticipation(
+    interaction: ChatInputCommandInteraction,
+    printDate: string,
+    store: WordleSessionStore,
+): Promise<void> {
+    const guildId = getWordleGuildId(interaction);
+
+    store.registerGuildParticipant(interaction.user.id, printDate, guildId);
+    await refreshWordlePublicStatusPanels(interaction, printDate, store);
+}
+
 export async function startWordleGame(
     interaction: ChatInputCommandInteraction,
     game: WordleGame,
@@ -887,6 +898,7 @@ export async function startWordleGame(
             panelMessage: refreshedPanelMessage,
         };
         store.set(interaction.user.id, game.puzzle.printDate, guildId, refreshedSession);
+        await registerWordleCommandParticipation(interaction, game.puzzle.printDate, store);
 
         await showPrivateWordleState(
             interaction,
@@ -901,6 +913,7 @@ export async function startWordleGame(
 
     const session = createNewWordleSession(game);
     store.set(interaction.user.id, game.puzzle.printDate, guildId, session);
+    await registerWordleCommandParticipation(interaction, game.puzzle.printDate, store);
 
     await showPrivateWordleState(interaction, session, undefined, store);
 }
@@ -923,6 +936,7 @@ async function submitWordleCommandGuess(
         await deletePreviousPrivateResponse(existingSession, interaction);
     }
     store.set(interaction.user.id, game.puzzle.printDate, guildId, session);
+    await registerWordleCommandParticipation(interaction, game.puzzle.printDate, store);
 
     const guess = normalizeGuess(rawGuess);
 

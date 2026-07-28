@@ -29,7 +29,7 @@ export interface WordleSessionStoreOptions {
 export interface WordleRecentPlayer {
     userId: string;
     game: WordleGame;
-    inputOrder: number;
+    activityOrder: number;
 }
 
 export interface WordleRecentPlayers {
@@ -54,7 +54,7 @@ interface PersistedWordleGame {
 
 interface PersistedRecentPlayer {
     user_id: string;
-    input_order: number;
+    last_activity_order: number;
 }
 
 interface PersistedPlayerCount {
@@ -127,10 +127,10 @@ function parseGameStatus(value: string): GameStatus {
 export class WordleSessionStore {
     private readonly games = new Map<string, WordleGame>();
     private readonly serverStates = new Map<string, WordleServerState>();
-    private readonly inputOrders = new Map<string, number>();
+    private readonly participantActivityOrders = new Map<string, number>();
     private readonly publicStatusPanels = new Map<string, WordlePublicStatusPanel>();
     private readonly database: DatabaseSync | undefined;
-    private nextInputOrder = 1;
+    private nextActivityOrder = 1;
     private databaseClosed = false;
 
     public constructor(options: WordleSessionStoreOptions = {}) {
@@ -175,6 +175,39 @@ export class WordleSessionStore {
             CREATE INDEX IF NOT EXISTS wordle_input_activity_recent
             ON wordle_input_activity (guild_id, print_date, order_id DESC);
 
+            CREATE TABLE IF NOT EXISTS wordle_guild_participants (
+                guild_id TEXT NOT NULL,
+                print_date TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                last_activity_order INTEGER NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (guild_id, print_date, user_id)
+            );
+
+            CREATE INDEX IF NOT EXISTS wordle_guild_participants_recent
+            ON wordle_guild_participants (
+                guild_id,
+                print_date,
+                last_activity_order DESC
+            );
+
+            INSERT INTO wordle_guild_participants (
+                guild_id,
+                print_date,
+                user_id,
+                last_activity_order,
+                updated_at
+            )
+            SELECT
+                guild_id,
+                print_date,
+                user_id,
+                MAX(order_id),
+                strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+            FROM wordle_input_activity
+            GROUP BY guild_id, print_date, user_id
+            ON CONFLICT (guild_id, print_date, user_id) DO NOTHING;
+
             CREATE TABLE IF NOT EXISTS wordle_public_status_panels (
                 guild_id TEXT NOT NULL,
                 channel_id TEXT NOT NULL,
@@ -212,6 +245,32 @@ export class WordleSessionStore {
         this.storeSessionInMemory(gameKey, guildId, session);
     }
 
+    public registerGuildParticipant(userId: string, printDate: string, guildId: string): number {
+        let activityOrder: number;
+
+        if (this.database === undefined) {
+            activityOrder = this.nextActivityOrder;
+            this.nextActivityOrder += 1;
+        } else {
+            this.database.exec("BEGIN IMMEDIATE");
+
+            try {
+                activityOrder = this.saveGuildParticipantActivity(userId, printDate, guildId);
+                this.database.exec("COMMIT");
+            } catch (error) {
+                this.database.exec("ROLLBACK");
+                throw error;
+            }
+        }
+
+        this.participantActivityOrders.set(
+            this.createParticipantKey(guildId, printDate, userId),
+            activityOrder,
+        );
+
+        return activityOrder;
+    }
+
     public recordValidGuess(
         userId: string,
         printDate: string,
@@ -219,11 +278,11 @@ export class WordleSessionStore {
         session: WordleSession,
     ): number {
         const gameKey = this.createGameKey(userId, printDate);
-        let inputOrder: number;
+        let activityOrder: number;
 
         if (this.database === undefined) {
-            inputOrder = this.nextInputOrder;
-            this.nextInputOrder += 1;
+            activityOrder = this.nextActivityOrder;
+            this.nextActivityOrder += 1;
         } else {
             this.database.exec("BEGIN IMMEDIATE");
 
@@ -238,7 +297,11 @@ export class WordleSessionStore {
                     )
                     .run(guildId, printDate, userId);
 
-                inputOrder = Number(result.lastInsertRowid);
+                if (!Number.isSafeInteger(Number(result.lastInsertRowid))) {
+                    throw new Error("SQLite에 Wordle 입력 활동을 기록하지 못했습니다.");
+                }
+
+                activityOrder = this.saveGuildParticipantActivity(userId, printDate, guildId);
                 this.database.exec("COMMIT");
             } catch (error) {
                 this.database.exec("ROLLBACK");
@@ -246,10 +309,13 @@ export class WordleSessionStore {
             }
         }
 
-        this.inputOrders.set(this.createInputOrderKey(guildId, printDate, userId), inputOrder);
+        this.participantActivityOrders.set(
+            this.createParticipantKey(guildId, printDate, userId),
+            activityOrder,
+        );
         this.storeSessionInMemory(gameKey, guildId, session);
 
-        return inputOrder;
+        return activityOrder;
     }
 
     public getRecentPlayers(
@@ -262,9 +328,9 @@ export class WordleSessionStore {
         }
 
         if (this.database === undefined) {
-            const recentPlayers = [...this.inputOrders.entries()]
-                .flatMap(([key, inputOrder]) => {
-                    const parsedKey = this.parseInputOrderKey(key);
+            const recentPlayers = [...this.participantActivityOrders.entries()]
+                .flatMap(([key, activityOrder]) => {
+                    const parsedKey = this.parseParticipantKey(key);
 
                     if (
                         parsedKey === undefined ||
@@ -284,11 +350,11 @@ export class WordleSessionStore {
                               {
                                   userId: parsedKey.userId,
                                   game,
-                                  inputOrder,
+                                  activityOrder,
                               },
                           ];
                 })
-                .sort((left, right) => right.inputOrder - left.inputOrder);
+                .sort((left, right) => right.activityOrder - left.activityOrder);
 
             return {
                 players: recentPlayers.slice(0, limit),
@@ -299,14 +365,13 @@ export class WordleSessionStore {
         const rows = this.database
             .prepare(
                 `
-                    SELECT activity.user_id, MAX(activity.order_id) AS input_order
-                    FROM wordle_input_activity AS activity
+                    SELECT participant.user_id, participant.last_activity_order
+                    FROM wordle_guild_participants AS participant
                     INNER JOIN wordle_games AS game
-                        ON game.user_id = activity.user_id
-                        AND game.print_date = activity.print_date
-                    WHERE activity.guild_id = ? AND activity.print_date = ?
-                    GROUP BY activity.user_id
-                    ORDER BY input_order DESC
+                        ON game.user_id = participant.user_id
+                        AND game.print_date = participant.print_date
+                    WHERE participant.guild_id = ? AND participant.print_date = ?
+                    ORDER BY participant.last_activity_order DESC
                     LIMIT ?
                 `,
             )
@@ -314,12 +379,12 @@ export class WordleSessionStore {
         const countRow = this.database
             .prepare(
                 `
-                    SELECT COUNT(DISTINCT activity.user_id) AS player_count
-                    FROM wordle_input_activity AS activity
+                    SELECT COUNT(*) AS player_count
+                    FROM wordle_guild_participants AS participant
                     INNER JOIN wordle_games AS game
-                        ON game.user_id = activity.user_id
-                        AND game.print_date = activity.print_date
-                    WHERE activity.guild_id = ? AND activity.print_date = ?
+                        ON game.user_id = participant.user_id
+                        AND game.print_date = participant.print_date
+                    WHERE participant.guild_id = ? AND participant.print_date = ?
                 `,
             )
             .get(guildId, printDate) as unknown as PersistedPlayerCount;
@@ -327,8 +392,8 @@ export class WordleSessionStore {
             const gameKey = this.createGameKey(row.user_id, printDate);
             const game = this.games.get(gameKey) ?? this.loadGame(row.user_id, printDate);
 
-            if (game === undefined || !Number.isSafeInteger(row.input_order)) {
-                throw new Error("SQLite에 저장된 Wordle 입력 순서 정보가 올바르지 않습니다.");
+            if (game === undefined || !Number.isSafeInteger(row.last_activity_order)) {
+                throw new Error("SQLite에 저장된 Wordle 참여 활동 순서 정보가 올바르지 않습니다.");
             }
 
             this.games.set(gameKey, game);
@@ -336,7 +401,7 @@ export class WordleSessionStore {
             return {
                 userId: row.user_id,
                 game,
-                inputOrder: row.input_order,
+                activityOrder: row.last_activity_order,
             };
         });
 
@@ -541,6 +606,51 @@ export class WordleSessionStore {
             );
     }
 
+    private saveGuildParticipantActivity(
+        userId: string,
+        printDate: string,
+        guildId: string,
+    ): number {
+        if (this.database === undefined) {
+            throw new Error("SQLite 없이 참여 활동 순서를 저장할 수 없습니다.");
+        }
+
+        const row = this.database
+            .prepare(
+                `
+                    SELECT COALESCE(MAX(last_activity_order), 0) + 1 AS next_activity_order
+                    FROM wordle_guild_participants
+                    WHERE guild_id = ? AND print_date = ?
+                `,
+            )
+            .get(guildId, printDate) as { next_activity_order: number };
+        const activityOrder = row.next_activity_order;
+
+        if (!Number.isSafeInteger(activityOrder) || activityOrder < 1) {
+            throw new Error("SQLite에서 Wordle 참여 활동 순서를 생성하지 못했습니다.");
+        }
+
+        this.database
+            .prepare(
+                `
+                    INSERT INTO wordle_guild_participants (
+                        guild_id,
+                        print_date,
+                        user_id,
+                        last_activity_order,
+                        updated_at
+                    )
+                    VALUES (?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+                    ON CONFLICT (guild_id, print_date, user_id) DO UPDATE SET
+                        last_activity_order = excluded.last_activity_order,
+                        updated_at = excluded.updated_at
+                `,
+            )
+            .run(guildId, printDate, userId, activityOrder);
+
+        return activityOrder;
+    }
+
     private storeSessionInMemory(gameKey: string, guildId: string, session: WordleSession): void {
         this.games.set(gameKey, session.game);
         this.serverStates.set(this.createServerKey(gameKey, guildId), {
@@ -577,11 +687,11 @@ export class WordleSessionStore {
         return `${guildId}:${gameKey}`;
     }
 
-    private createInputOrderKey(guildId: string, printDate: string, userId: string): string {
+    private createParticipantKey(guildId: string, printDate: string, userId: string): string {
         return `${guildId}:${printDate}:${userId}`;
     }
 
-    private parseInputOrderKey(
+    private parseParticipantKey(
         key: string,
     ): { guildId: string; printDate: string; userId: string } | undefined {
         const [guildId, printDate, userId, extraPart] = key.split(":");
