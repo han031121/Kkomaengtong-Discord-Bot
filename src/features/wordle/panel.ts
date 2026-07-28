@@ -83,15 +83,42 @@ function getPublicStatusLabel(status: GameStatus): string {
 export function getFoundAlphabetCounts(
     game: WordleGame,
 ): Readonly<{ present: number; correct: number }> {
+    const knownOccurrences = new Map<string, number>();
+    const correctPositions = new Map<string, Set<number>>();
     let present = 0;
     let correct = 0;
 
-    for (const state of getAlphabetStates(game).values()) {
-        if (state === "present") {
-            present += 1;
-        } else if (state === "correct") {
-            correct += 1;
+    for (const guess of game.guesses) {
+        const matchedOccurrences = new Map<string, number>();
+
+        for (let index = 0; index < guess.word.length; index += 1) {
+            const letter = guess.word[index]?.toUpperCase();
+            const tile = guess.tiles[index];
+
+            if (letter === undefined || tile === undefined || tile === "absent") {
+                continue;
+            }
+
+            matchedOccurrences.set(letter, (matchedOccurrences.get(letter) ?? 0) + 1);
+
+            if (tile === "correct") {
+                const positions = correctPositions.get(letter) ?? new Set<number>();
+
+                positions.add(index);
+                correctPositions.set(letter, positions);
+            }
         }
+
+        for (const [letter, count] of matchedOccurrences) {
+            knownOccurrences.set(letter, Math.max(knownOccurrences.get(letter) ?? 0, count));
+        }
+    }
+
+    for (const [letter, occurrenceCount] of knownOccurrences) {
+        const correctCount = correctPositions.get(letter)?.size ?? 0;
+
+        correct += correctCount;
+        present += Math.max(occurrenceCount, correctCount) - correctCount;
     }
 
     return { present, correct };
