@@ -16,8 +16,7 @@ import {
     isWordleModal,
     wordleCommand,
 } from "../commands/wordle.js";
-import type { WordlePuzzleProvider } from "../commands/wordle.js";
-import type { WordleSessionStore } from "../features/wordle/session-store.js";
+import type { WordlePuzzleProvider, WordleSessionStore } from "../commands/wordle.js";
 import type { BotCommand } from "../types/command.js";
 
 export function createClient(

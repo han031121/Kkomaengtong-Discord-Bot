@@ -2,33 +2,9 @@ import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
-import type {
-    ButtonInteraction,
-    ChatInputCommandInteraction,
-    Message,
-    ModalSubmitInteraction,
-} from "discord.js";
-
 import type { EvaluatedGuess, GameStatus, TileState, WordleGame } from "./game.js";
 
-export interface WordleSession {
-    game: WordleGame;
-    panelMessage: Message | undefined;
-    privateResponseInteraction:
-        ButtonInteraction | ChatInputCommandInteraction | ModalSubmitInteraction | undefined;
-    privateResponseMessageId: string | undefined;
-    resultShared: boolean;
-}
-
-type WordleServerState = Omit<WordleSession, "game">;
-
-interface StoredWordleServerState extends WordleServerState {
-    guildId: string;
-    printDate: string;
-    userId: string;
-}
-
-export interface WordleSessionStoreOptions {
+export interface WordleDataStoreOptions {
     databasePath?: string;
 }
 
@@ -134,12 +110,11 @@ function parseGameStatus(value: string): GameStatus {
     throw new Error(`SQLite에 저장된 Wordle 게임 상태가 올바르지 않습니다: ${value}`);
 }
 
-export class WordleSessionStore {
-    private readonly serverStates = new Map<string, StoredWordleServerState>();
+export class WordleDataStore {
     private readonly database: DatabaseSync;
     private databaseClosed = false;
 
-    public constructor(options: WordleSessionStoreOptions = {}) {
+    public constructor(options: WordleDataStoreOptions = {}) {
         const requestedPath = options.databasePath ?? ":memory:";
         const databasePath = requestedPath === ":memory:" ? requestedPath : resolve(requestedPath);
 
@@ -217,27 +192,12 @@ export class WordleSessionStore {
         `);
     }
 
-    public get(userId: string, printDate: string, guildId: string): WordleSession | undefined {
-        const game = this.loadGame(userId, printDate);
-
-        if (game === undefined) {
-            return undefined;
-        }
-
-        const serverState = this.serverStates.get(this.createServerKey(userId, printDate, guildId));
-
-        return {
-            game,
-            panelMessage: serverState?.panelMessage,
-            privateResponseInteraction: serverState?.privateResponseInteraction,
-            privateResponseMessageId: serverState?.privateResponseMessageId,
-            resultShared: serverState?.resultShared ?? false,
-        };
+    public get(userId: string, printDate: string): WordleGame | undefined {
+        return this.loadGame(userId, printDate);
     }
 
-    public set(userId: string, printDate: string, guildId: string, session: WordleSession): void {
-        this.saveGame(userId, printDate, session.game);
-        this.storeServerState(userId, printDate, guildId, session);
+    public set(userId: string, printDate: string, game: WordleGame): void {
+        this.saveGame(userId, printDate, game);
     }
 
     public registerGuildParticipant(userId: string, printDate: string, guildId: string): number {
@@ -250,21 +210,14 @@ export class WordleSessionStore {
         userId: string,
         printDate: string,
         guildId: string,
-        session: WordleSession,
+        game: WordleGame,
     ): number {
         const activityOrder = this.runTransaction(() => {
-            this.saveGame(userId, printDate, session.game);
+            this.saveGame(userId, printDate, game);
             return this.saveGuildParticipantActivity(userId, printDate, guildId);
         });
 
-        this.storeServerState(userId, printDate, guildId, session);
         return activityOrder;
-    }
-
-    public listServerGuildIds(userId: string, printDate: string): readonly string[] {
-        return [...this.serverStates.values()]
-            .filter((state) => state.userId === userId && state.printDate === printDate)
-            .map((state) => state.guildId);
     }
 
     public listParticipantGuildIds(userId: string, printDate: string): readonly string[] {
@@ -280,25 +233,6 @@ export class WordleSessionStore {
             .all(userId, printDate) as unknown as PersistedGuildId[];
 
         return rows.map((row) => row.guild_id);
-    }
-
-    public setSharedPanelMessage(
-        userId: string,
-        printDate: string,
-        guildId: string,
-        message: Message,
-    ): void {
-        const key = this.createServerKey(userId, printDate, guildId);
-        const state = this.serverStates.get(key);
-
-        if (state === undefined) {
-            return;
-        }
-
-        this.serverStates.set(key, {
-            ...state,
-            panelMessage: message,
-        });
     }
 
     public getRecentPlayers(
@@ -572,23 +506,6 @@ export class WordleSessionStore {
         }
     }
 
-    private storeServerState(
-        userId: string,
-        printDate: string,
-        guildId: string,
-        session: WordleSession,
-    ): void {
-        this.serverStates.set(this.createServerKey(userId, printDate, guildId), {
-            guildId,
-            panelMessage: session.panelMessage,
-            printDate,
-            privateResponseInteraction: session.privateResponseInteraction,
-            privateResponseMessageId: session.privateResponseMessageId,
-            resultShared: session.resultShared,
-            userId,
-        });
-    }
-
     private parsePublicStatusPanel(row: PersistedPublicStatusPanel): WordlePublicStatusPanel {
         if (
             !/^\d{17,20}$/.test(row.guild_id) ||
@@ -605,9 +522,5 @@ export class WordleSessionStore {
             messageId: row.message_id,
             printDate: row.print_date,
         };
-    }
-
-    private createServerKey(userId: string, printDate: string, guildId: string): string {
-        return `${guildId}:${userId}:${printDate}`;
     }
 }

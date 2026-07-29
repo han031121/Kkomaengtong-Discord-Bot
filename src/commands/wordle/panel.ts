@@ -8,8 +8,8 @@ import {
 } from "@discordjs/builders";
 import { ButtonStyle, Colors, SeparatorSpacingSize } from "discord.js";
 
-import { WORDLE_MAX_GUESSES } from "./game.js";
-import type { GameStatus, TileState, WordleGame } from "./game.js";
+import { WORDLE_MAX_GUESSES } from "../../features/wordle/game.js";
+import type { GameStatus, TileState, WordleGame } from "../../features/wordle/game.js";
 
 const TILE_EMOJI: Readonly<Record<TileState, string>> = {
     absent: "⬛",

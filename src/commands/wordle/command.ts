@@ -8,8 +8,6 @@ import {
     WordlePuzzleUnavailableError,
     wordlePuzzleCache,
 } from "../../features/wordle/puzzle-cache.js";
-import type { WordleSessionStore } from "../../features/wordle/session-store.js";
-import type { WordleSession } from "../../features/wordle/session-store.js";
 import type { BotCommand } from "../../types/command.js";
 import {
     createCompletedResponse,
@@ -24,6 +22,7 @@ import {
 import { processWordleGuess } from "./modal-handler.js";
 import type { WordleDictionary } from "./modal-handler.js";
 import { refreshWordlePublicStatusPanels, updatePublicWordlePanel } from "./public-status.js";
+import type { WordleSession, WordleSessionStore } from "./session-store.js";
 
 const localDictionary = new LocalDictionary();
 const WORDLE_GUESS_OPTION_NAME = "단어";

@@ -1,11 +1,8 @@
 import { MessageFlags } from "discord.js";
 import type { ButtonInteraction } from "discord.js";
 
-import {
-    createPublicWordleContainer,
-    createWordleSpoilerContainer,
-} from "../../features/wordle/panel.js";
-import type { WordleSession, WordleSessionStore } from "../../features/wordle/session-store.js";
+import { createPublicWordleContainer, createWordleSpoilerContainer } from "./panel.js";
+import type { WordleSession, WordleSessionStore } from "./session-store.js";
 import {
     createCompletedResponse,
     createEphemeralNoticeResponse,

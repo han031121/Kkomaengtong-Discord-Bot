@@ -2,8 +2,6 @@ import type { ModalSubmitInteraction } from "discord.js";
 
 import { normalizeGuess, submitGuess } from "../../features/wordle/game.js";
 import { LocalDictionary } from "../../features/wordle/local-dictionary.js";
-import type { WordleSessionStore } from "../../features/wordle/session-store.js";
-import type { WordleSession } from "../../features/wordle/session-store.js";
 import {
     createCompletedResponse,
     createEphemeralNoticeResponse,
@@ -19,6 +17,7 @@ import {
 } from "./interaction-builders.js";
 import type { WordleGuessInteraction } from "./interaction-builders.js";
 import { refreshSharedWordlePanels, refreshWordlePublicStatusPanels } from "./public-status.js";
+import type { WordleSession, WordleSessionStore } from "./session-store.js";
 
 const localDictionary = new LocalDictionary();
 

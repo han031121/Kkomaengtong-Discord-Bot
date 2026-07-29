@@ -16,12 +16,9 @@ import type {
 import { AsyncKeyedLock } from "../../features/wordle/async-keyed-lock.js";
 import { WORDLE_MAX_GUESSES } from "../../features/wordle/game.js";
 import type { WordleGame } from "../../features/wordle/game.js";
-import {
-    createPrivateWordleContainer,
-    createWordleNoticeContainer,
-} from "../../features/wordle/panel.js";
-import { WordleSessionStore } from "../../features/wordle/session-store.js";
-import type { WordleSession } from "../../features/wordle/session-store.js";
+import { createPrivateWordleContainer, createWordleNoticeContainer } from "./panel.js";
+import { WordleSessionStore } from "./session-store.js";
+import type { WordleSession } from "./session-store.js";
 
 const WORDLE_SHARE_BUTTON_PREFIX = "wordle:share";
 const WORDLE_SPOILER_BUTTON_PREFIX = "wordle:spoiler";

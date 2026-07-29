@@ -12,7 +12,7 @@ import {
     createPublicWordleContainer,
     createWordlePublicStatusContainer,
     getFoundAlphabetCounts,
-} from "../src/features/wordle/panel.js";
+} from "../src/commands/wordle/panel.js";
 
 const puzzle: WordlePuzzle = {
     id: 1234,

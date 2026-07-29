@@ -3,15 +3,7 @@ import type { Message, SendableChannels } from "discord.js";
 
 import { AsyncKeyedLock } from "../../features/wordle/async-keyed-lock.js";
 import type { WordleGame } from "../../features/wordle/game.js";
-import {
-    createPublicWordleContainer,
-    createWordlePublicStatusContainer,
-} from "../../features/wordle/panel.js";
-import type {
-    WordlePublicStatusPanel,
-    WordleSession,
-    WordleSessionStore,
-} from "../../features/wordle/session-store.js";
+import { createPublicWordleContainer, createWordlePublicStatusContainer } from "./panel.js";
 import {
     defaultWordleSessionStore,
     getDiscordErrorCode,
@@ -19,6 +11,11 @@ import {
     SUPPRESSED_ALLOWED_MENTIONS,
 } from "./interaction-builders.js";
 import type { WordleInteraction } from "./interaction-builders.js";
+import type {
+    WordlePublicStatusPanel,
+    WordleSession,
+    WordleSessionStore,
+} from "./session-store.js";
 
 const publicStatusPanelLock = new AsyncKeyedLock();
 const RECOVERABLE_PANEL_ERROR_CODES = new Set([

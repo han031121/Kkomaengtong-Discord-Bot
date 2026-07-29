@@ -21,14 +21,14 @@ import {
     showPrivateWordleState,
     startWordleGame,
     updatePublicWordlePanel,
+    WordleSessionStore,
     wordleCommand,
 } from "../src/commands/wordle.js";
+import type { WordleSession } from "../src/commands/wordle.js";
 import { createWordleGame, submitGuess } from "../src/features/wordle/game.js";
 import type { WordlePuzzle } from "../src/features/wordle/game.js";
 import { LocalDictionary } from "../src/features/wordle/local-dictionary.js";
 import { WordlePuzzleUnavailableError } from "../src/features/wordle/puzzle-cache.js";
-import { WordleSessionStore } from "../src/features/wordle/session-store.js";
-import type { WordleSession } from "../src/features/wordle/session-store.js";
 
 const puzzle: WordlePuzzle = {
     id: 1234,

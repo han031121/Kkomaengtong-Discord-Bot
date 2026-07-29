@@ -19,3 +19,6 @@ export {
     sendPublicWordlePanel,
     updatePublicWordlePanel,
 } from "./wordle/public-status.js";
+
+export { WordleSessionStore } from "./wordle/session-store.js";
+export type { WordlePublicStatusPanel, WordleSession } from "./wordle/session-store.js";
