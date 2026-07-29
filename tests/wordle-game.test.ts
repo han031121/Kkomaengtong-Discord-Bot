@@ -122,8 +122,7 @@ describe("Wordle 공개 현황 패널", () => {
             components: [
                 {
                     type: 10,
-                    content:
-                        "<@12345678901234567> **진행 중** · **1/6**\n찾음: 🟨 2개 · 🟩 1개",
+                    content: "<@12345678901234567> **진행 중** · **1/6**\n찾음: 🟨 2개 · 🟩 1개",
                 },
             ],
             accessory: {
@@ -133,7 +132,7 @@ describe("Wordle 공개 현황 패널", () => {
                 style: 2,
             },
         });
-        expect(panelJson).toContain("최근 입력 순 1명 표시 · 전체 3명");
+        expect(panelJson).toContain("최근 활동 순 1명 표시 · 전체 3명");
         expect(panelJson).not.toContain("alley");
         expect(panelJson).not.toContain("apple");
         expect(getFoundAlphabetCounts(game)).toEqual({
@@ -149,6 +148,34 @@ describe("Wordle 공개 현황 패널", () => {
             present: 1,
             correct: 3,
         });
+    });
+
+    it("자리를 모르는 중복 알파벳을 확인된 개수만큼 집계합니다", () => {
+        const repeatedLetterPuzzle: WordlePuzzle = {
+            ...puzzle,
+            solution: "eagle",
+        };
+        const game = submitGuess(createWordleGame(repeatedLetterPuzzle), "speed");
+        const panelJson = JSON.stringify(
+            createWordlePublicStatusContainer(
+                [{ userId: "12345678901234567", game }],
+                1,
+                repeatedLetterPuzzle.printDate,
+            ).toJSON(),
+        );
+
+        expect(game.guesses[0]?.tiles).toEqual([
+            "absent",
+            "absent",
+            "present",
+            "present",
+            "absent",
+        ]);
+        expect(getFoundAlphabetCounts(game)).toEqual({
+            present: 2,
+            correct: 0,
+        });
+        expect(panelJson).toContain("찾음: 🟨 2개 · 🟩 0개");
     });
 
     it("게임 상태를 성공, 실패, 진행 중 글자로 표시합니다", () => {
