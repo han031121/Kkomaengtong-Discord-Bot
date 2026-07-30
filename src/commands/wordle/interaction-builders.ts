@@ -39,7 +39,6 @@ export const wordleUserLock = new AsyncKeyedLock();
 
 export type WordleInteraction =
     ChatInputCommandInteraction | ButtonInteraction | ModalSubmitInteraction;
-export type WordleGuessInteraction = ChatInputCommandInteraction | ModalSubmitInteraction;
 type WordleButtonAction =
     "share" | "spoiler" | "input" | "progress-share" | "status-panel" | "status-view";
 

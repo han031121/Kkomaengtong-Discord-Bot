@@ -15,7 +15,7 @@ import {
     WORDLE_GUESS_INPUT_ID,
     wordleUserLock,
 } from "./interaction-builders.js";
-import type { WordleGuessInteraction } from "./interaction-builders.js";
+import type { WordleInteraction } from "./interaction-builders.js";
 import { refreshSharedWordlePanels, refreshWordlePublicStatusPanels } from "./public-status.js";
 import type { WordleSession, WordleSessionStore } from "./session-store.js";
 
@@ -24,7 +24,7 @@ const localDictionary = new LocalDictionary();
 export type WordleDictionary = Pick<LocalDictionary, "isEnglishWord">;
 
 export async function processWordleGuess(
-    interaction: WordleGuessInteraction,
+    interaction: WordleInteraction,
     printDate: string,
     guess: string,
     store: WordleSessionStore,

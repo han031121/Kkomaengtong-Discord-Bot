@@ -1,5 +1,5 @@
-export { createWordleCommand, startWordleGame, wordleCommand } from "./wordle/command.js";
-export type { WordlePuzzleProvider } from "./wordle/command.js";
+export { createWordleCommand, runWordle, wordleCommand } from "./wordle/command.js";
+export type { RunWordleOptions, WordlePuzzleProvider } from "./wordle/command.js";
 
 export {
     createWordleGuessModal,
@@ -10,6 +10,7 @@ export {
     isWordleModal,
     showPrivateWordleState,
 } from "./wordle/interaction-builders.js";
+export type { WordleInteraction } from "./wordle/interaction-builders.js";
 
 export { handleSpoilerButton, handleWordleButton } from "./wordle/button-handlers.js";
 export { handleWordleModal } from "./wordle/modal-handler.js";

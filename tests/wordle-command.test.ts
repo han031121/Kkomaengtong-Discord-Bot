@@ -17,9 +17,9 @@ import {
     handleWordleModal,
     isWordleButton,
     isWordleModal,
+    runWordle,
     sendPublicWordlePanel,
     showPrivateWordleState,
-    startWordleGame,
     updatePublicWordlePanel,
     WordleSessionStore,
     wordleCommand,
@@ -138,6 +138,59 @@ describe("Wordle 공개 메시지 전송", () => {
         expect(serializedResponse).toContain("단어 입력");
         expect(serializedResponse).toContain("현재 진행 공유");
         expect(serializedResponse).toContain("공개 현황 보기");
+    });
+
+    it("명령이 아닌 상호작용도 공용 진입점에서 같은 Wordle 화면과 참여 상태를 생성합니다", async () => {
+        const userId = "33345678901234567";
+        const store = new WordleSessionStore();
+        const editReply = vi.fn().mockResolvedValue({
+            id: "button-private-message",
+        });
+        let deferred = false;
+        const deferReply = vi.fn().mockImplementation(() => {
+            deferred = true;
+            return Promise.resolve();
+        });
+        const interaction = {
+            id: "wordle-entry-button",
+            get deferred() {
+                return deferred;
+            },
+            deferReply,
+            editReply,
+            guildId,
+            user: {
+                id: userId,
+                displayAvatarURL: () => "https://cdn.example.com/avatar.png",
+            },
+        } as unknown as ButtonInteraction;
+
+        await runWordle(interaction, {
+            puzzleProvider: createPuzzleProvider(),
+            store,
+        });
+
+        expect(deferReply).toHaveBeenCalledWith({ flags: 64 });
+        expect(store.getRecentPlayers(guildId, puzzle.printDate, 8)).toMatchObject({
+            totalPlayers: 1,
+            players: [
+                {
+                    userId,
+                    activityOrder: 1,
+                    game: {
+                        guesses: [],
+                    },
+                },
+            ],
+        });
+
+        const response = editReply.mock.calls[0]?.[0] as {
+            components: { toJSON(): unknown }[];
+        };
+        const serializedResponse = JSON.stringify(response.components[0]?.toJSON());
+
+        expect(serializedResponse).toContain("### 나의 Wordle #1860");
+        expect(serializedResponse).toContain("단어 입력");
     });
 
     it("/워들 단어 옵션으로 모달 없이 추측을 제출합니다", async () => {
@@ -756,6 +809,7 @@ describe("Wordle 서버별 진행 상태", () => {
             const interaction = {
                 id: `command-${interactionGuildId}`,
                 deferred: true,
+                deferReply: vi.fn().mockResolvedValue(undefined),
                 editReply,
                 guildId: interactionGuildId,
                 user: {
@@ -768,7 +822,10 @@ describe("Wordle 서버별 진행 상태", () => {
         };
         const otherGuild = createInteraction(otherGuildId);
 
-        await startWordleGame(otherGuild.interaction, createWordleGame(puzzle), store);
+        await runWordle(otherGuild.interaction, {
+            puzzleProvider: createPuzzleProvider(),
+            store,
+        });
 
         expect(panelEdit).not.toHaveBeenCalled();
         expect(
@@ -802,7 +859,10 @@ describe("Wordle 서버별 진행 상태", () => {
         );
 
         const currentGuild = createInteraction(guildId);
-        await startWordleGame(currentGuild.interaction, createWordleGame(puzzle), store);
+        await runWordle(currentGuild.interaction, {
+            puzzleProvider: createPuzzleProvider(),
+            store,
+        });
 
         expect(panelEdit).toHaveBeenCalledOnce();
         expect(store.get(userId, puzzle.printDate, guildId)?.panelMessage).toBe(panelMessage);
@@ -1267,6 +1327,7 @@ describe("Wordle 결과 버튼", () => {
         const interaction = {
             id: "reopen-wordle-command",
             deferred: true,
+            deferReply: vi.fn().mockResolvedValue(undefined),
             editReply,
             guildId,
             user: {
@@ -1276,7 +1337,10 @@ describe("Wordle 결과 버튼", () => {
         } as unknown as ChatInputCommandInteraction;
         store.set(userId, puzzle.printDate, guildId, session);
 
-        await startWordleGame(interaction, createWordleGame(puzzle), store);
+        await runWordle(interaction, {
+            puzzleProvider: createPuzzleProvider(),
+            store,
+        });
 
         expect(store.get(userId, puzzle.printDate, guildId)?.resultShared).toBe(false);
 
