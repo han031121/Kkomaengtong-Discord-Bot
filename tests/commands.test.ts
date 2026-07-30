@@ -3,6 +3,16 @@ import { describe, expect, it } from "vitest";
 
 import { commands } from "../src/commands/index.js";
 
+function getCommand(name: string) {
+    const command = commands.find((candidate) => candidate.data.name === name);
+
+    if (command === undefined) {
+        throw new Error(`${name} 명령어가 등록되지 않았습니다.`);
+    }
+
+    return command.data.toJSON();
+}
+
 describe("슬래시 명령어 정의", () => {
     it("명령어 이름이 중복되지 않습니다", () => {
         const names = commands.map((command) => command.data.name);
@@ -20,15 +30,7 @@ describe("슬래시 명령어 정의", () => {
     });
 
     it("테스트 명령어는 다섯 선택지가 있는 필수 옵션을 사용합니다", () => {
-        const command = commands.find((candidate) => candidate.data.name === "테스트");
-
-        expect(command).toBeDefined();
-
-        if (command === undefined) {
-            throw new Error("테스트 명령어가 등록되지 않았습니다.");
-        }
-
-        const commandData = command.data.toJSON();
+        const commandData = getCommand("테스트");
 
         expect(commandData.name).toBe("테스트");
         expect(commandData.options).toEqual([
@@ -49,15 +51,7 @@ describe("슬래시 명령어 정의", () => {
     });
 
     it("Wordle 명령어는 선택적인 5글자 단어 옵션을 사용합니다", () => {
-        const command = commands.find((candidate) => candidate.data.name === "워들");
-
-        expect(command).toBeDefined();
-
-        if (command === undefined) {
-            throw new Error("Wordle 명령어가 등록되지 않았습니다.");
-        }
-
-        const commandData = command.data.toJSON();
+        const commandData = getCommand("워들");
 
         expect(commandData.options).toHaveLength(1);
         expect(commandData.options?.[0]).toMatchObject({

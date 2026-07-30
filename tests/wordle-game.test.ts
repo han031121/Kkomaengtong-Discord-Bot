@@ -13,11 +13,10 @@ import {
     createWordlePublicStatusContainer,
     getFoundAlphabetCounts,
 } from "../src/commands/wordle/panel.js";
+import { createLostGame, WORDLE_TEST_PUZZLE } from "./wordle-test-helpers.js";
 
-const puzzle: WordlePuzzle = {
-    id: 1234,
-    solution: "apple",
-    printDate: "2026-07-23",
+const puzzle = {
+    ...WORDLE_TEST_PUZZLE,
     puzzleNumber: 1890,
 };
 
@@ -47,11 +46,7 @@ describe("Wordle 게임 규칙", () => {
     });
 
     it("여섯 번 안에 맞히지 못하면 종료 상태가 됩니다", () => {
-        let game = createWordleGame(puzzle);
-
-        for (let attempt = 0; attempt < 6; attempt += 1) {
-            game = submitGuess(game, "crane");
-        }
+        const game = createLostGame(puzzle);
 
         expect(game.status).toBe("lost");
         expect(() => submitGuess(game, "apple")).toThrow("이미 종료된 Wordle 게임입니다.");
@@ -181,11 +176,7 @@ describe("Wordle 공개 현황 패널", () => {
     it("게임 상태를 성공, 실패, 진행 중 글자로 표시합니다", () => {
         const playingGame = submitGuess(createWordleGame(puzzle), "alley");
         const wonGame = submitGuess(createWordleGame(puzzle), "apple");
-        let lostGame = createWordleGame(puzzle);
-
-        for (let attempt = 0; attempt < 6; attempt += 1) {
-            lostGame = submitGuess(lostGame, "crane");
-        }
+        const lostGame = createLostGame(puzzle);
 
         const panelJson = JSON.stringify(
             createWordlePublicStatusContainer(

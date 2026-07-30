@@ -6,17 +6,16 @@ import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createWordleGame, submitGuess } from "../src/features/wordle/game.js";
-import type { WordlePuzzle } from "../src/features/wordle/game.js";
 import { WordleDataStore } from "../src/features/wordle/data-store.js";
+import { WORDLE_TEST_IDS, WORDLE_TEST_PUZZLE } from "./wordle-test-helpers.js";
 
-const puzzle: WordlePuzzle = {
+const puzzle = {
+    ...WORDLE_TEST_PUZZLE,
     id: 2_906,
-    solution: "apple",
     printDate: "2026-07-24",
     puzzleNumber: 1_861,
 };
-const userId = "12345678901234567";
-const guildId = "22345678901234567";
+const { guild: guildId, user: userId } = WORDLE_TEST_IDS;
 
 describe("Wordle SQLite 세션 저장소", () => {
     const temporaryDirectories: string[] = [];
@@ -84,19 +83,6 @@ describe("Wordle SQLite 세션 저장소", () => {
         const thirdStore = openStore(databasePath);
 
         expect(thirdStore.get(userId, puzzle.printDate)).toEqual(wonGame);
-    });
-
-    it("저장된 게임은 다른 서버에서도 같은 사용자의 진행 사항으로 복원합니다", () => {
-        const databasePath = createDatabasePath();
-        const firstStore = openStore(databasePath);
-        const game = submitGuess(createWordleGame(puzzle), "crane");
-
-        firstStore.set(userId, puzzle.printDate, game);
-        firstStore.close();
-
-        const restartedStore = openStore(databasePath);
-
-        expect(restartedStore.get(userId, puzzle.printDate)).toEqual(game);
     });
 
     it("같은 날짜에 진행한 서로 다른 사용자의 게임을 분리해서 저장합니다", () => {
