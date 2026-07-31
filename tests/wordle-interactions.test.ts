@@ -144,6 +144,7 @@ describe("Wordle UI 구성 요소", () => {
 
 describe("Wordle 식별자 검증", () => {
     it.each([
+        "wordle:play",
         "wordle:share:2026-07-23:12345678901234567",
         "wordle:spoiler:2026-07-23:12345678901234567",
         "wordle:input:2026-07-23:12345678901234567",
@@ -155,6 +156,7 @@ describe("Wordle 식별자 검증", () => {
     });
 
     it.each([
+        "wordle:play:2026-07-23:12345678901234567",
         "wordle:view:2026-07-23:12345678901234567",
         "wordle:share:wrong-date:12345678901234567",
         "another:share:2026-07-23:12345678901234567",
@@ -172,6 +174,24 @@ describe("Wordle 식별자 검증", () => {
 });
 
 describe("Wordle 버튼 상호작용", () => {
+    it("지금 플레이 버튼은 명령어 없이 비공개 게임 화면을 엽니다", async () => {
+        const store = new WordleSessionStore();
+        const puzzleProvider = createPuzzleProvider();
+        const context = createButtonInteraction(wordleButtonId("play"));
+
+        await handleWordleButton(context.interaction, store, puzzleProvider);
+
+        expect(puzzleProvider.getTodaysPuzzle).toHaveBeenCalledOnce();
+        expect(context.deferReply).toHaveBeenCalledWith({ flags: 64 });
+        expect(context.deferUpdate).not.toHaveBeenCalled();
+        expect(store.getRecentPlayers(guildId, puzzle.printDate, 8)).toMatchObject({
+            players: [{ activityOrder: 1, userId }],
+            totalPlayers: 1,
+        });
+        expect(getComponentJson(context.editReply)).toContain("### 나의 Wordle #1860");
+        expect(getComponentJson(context.editReply)).toContain("단어 입력");
+    });
+
     it("실패 결과는 같은 비공개 화면에서 한 번만 공유합니다", async () => {
         const ownerId = "62345678901234567";
         const store = new WordleSessionStore();
@@ -239,6 +259,7 @@ describe("Wordle 버튼 상호작용", () => {
         expect(getComponentJson(context.reply)).toContain("🟩🟨⬛🟨⬛");
         expect(getComponentJson(context.reply)).not.toContain("alley");
         expect(getComponentJson(context.reply)).not.toContain("apple");
+        expect(getComponentJson(context.reply, 0, 1)).toContain('"label":"지금 플레이"');
     });
 
     it("스포일러는 비공개 응답이 아닌 채널의 빨간 컨테이너로 전송합니다", async () => {

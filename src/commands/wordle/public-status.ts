@@ -3,7 +3,11 @@ import type { Message, SendableChannels } from "discord.js";
 
 import { AsyncKeyedLock } from "../../features/wordle/async-keyed-lock.js";
 import type { WordleGame } from "../../features/wordle/game.js";
-import { createPublicWordleContainer, createWordlePublicStatusContainer } from "./panel.js";
+import {
+    createPublicWordleContainer,
+    createWordlePlayActionRow,
+    createWordlePublicStatusContainer,
+} from "./panel.js";
 import {
     defaultWordleSessionStore,
     getDiscordErrorCode,
@@ -27,12 +31,11 @@ const RECOVERABLE_PANEL_ERROR_CODES = new Set([
 ]);
 const WORDLE_PUBLIC_STATUS_PLAYER_LIMIT = 8;
 
-function createPublicPanel(interaction: WordleInteraction, game: WordleGame) {
-    return createPublicWordleContainer(
-        game,
-        interaction.user.id,
-        interaction.user.displayAvatarURL(),
-    );
+function createPublicPanelComponents(interaction: WordleInteraction, game: WordleGame) {
+    return [
+        createPublicWordleContainer(game, interaction.user.id, interaction.user.displayAvatarURL()),
+        createWordlePlayActionRow(),
+    ];
 }
 
 export async function sendPublicWordlePanel(
@@ -50,7 +53,7 @@ export async function sendPublicWordlePanel(
     }
 
     return channel.send({
-        components: [createPublicPanel(interaction, game)],
+        components: createPublicPanelComponents(interaction, game),
         flags: MessageFlags.IsComponentsV2,
         allowedMentions: { users: [interaction.user.id] },
     });
@@ -80,7 +83,7 @@ async function resolveSendableChannel(
     return channel;
 }
 
-function createPublicStatusPanelComponent(
+function createPublicStatusPanelComponents(
     store: WordleSessionStore,
     guildId: string,
     printDate: string,
@@ -91,11 +94,14 @@ function createPublicStatusPanelComponent(
         WORDLE_PUBLIC_STATUS_PLAYER_LIMIT,
     );
 
-    return createWordlePublicStatusContainer(
-        recentPlayers.players,
-        recentPlayers.totalPlayers,
-        printDate,
-    );
+    return [
+        createWordlePublicStatusContainer(
+            recentPlayers.players,
+            recentPlayers.totalPlayers,
+            printDate,
+        ),
+        createWordlePlayActionRow(),
+    ];
 }
 
 async function sendPublicStatusPanelMessage(
@@ -105,7 +111,7 @@ async function sendPublicStatusPanelMessage(
     printDate: string,
 ): Promise<Message> {
     return channel.send({
-        components: [createPublicStatusPanelComponent(store, guildId, printDate)],
+        components: createPublicStatusPanelComponents(store, guildId, printDate),
         flags: MessageFlags.IsComponentsV2,
         allowedMentions: SUPPRESSED_ALLOWED_MENTIONS,
     });
@@ -316,7 +322,7 @@ async function refreshPublicStatusPanelMessage(
         await message.edit({
             content: null,
             embeds: [],
-            components: [createPublicStatusPanelComponent(store, panel.guildId, panel.printDate)],
+            components: createPublicStatusPanelComponents(store, panel.guildId, panel.printDate),
             flags: MessageFlags.IsComponentsV2,
             allowedMentions: SUPPRESSED_ALLOWED_MENTIONS,
         });
@@ -395,7 +401,7 @@ async function updateSharedWordlePanel(
         return await panelMessage.edit({
             content: null,
             embeds: [],
-            components: [createPublicPanel(interaction, game)],
+            components: createPublicPanelComponents(interaction, game),
             flags: MessageFlags.IsComponentsV2,
             allowedMentions: { users: [interaction.user.id] },
         });
@@ -479,7 +485,7 @@ export async function updatePublicWordlePanel(
         return await panelMessage.edit({
             content: null,
             embeds: [],
-            components: [createPublicPanel(interaction, game)],
+            components: createPublicPanelComponents(interaction, game),
             flags: MessageFlags.IsComponentsV2,
             allowedMentions: { users: [interaction.user.id] },
         });

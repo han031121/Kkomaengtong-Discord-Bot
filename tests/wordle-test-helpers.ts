@@ -247,17 +247,22 @@ export function getCallArgument<T>(mock: Mock, callIndex = 0): T {
     return call[0] as T;
 }
 
-export function getComponentJson(mock: Mock, callIndex = 0): string {
+export function getComponentJson(mock: Mock, callIndex = 0, componentIndex = 0): string {
     const response = getCallArgument<{
         components: { toJSON(): unknown }[];
     }>(mock, callIndex);
 
-    return JSON.stringify(response.components[0]?.toJSON());
+    return JSON.stringify(response.components[componentIndex]?.toJSON());
 }
 
 export function wordleButtonId(
-    action: "input" | "progress-share" | "share" | "spoiler" | "status-panel" | "status-view",
+    action:
+        "input" | "play" | "progress-share" | "share" | "spoiler" | "status-panel" | "status-view",
     userId = WORDLE_TEST_IDS.user,
 ): string {
+    if (action === "play") {
+        return "wordle:play";
+    }
+
     return `wordle:${action}:${WORDLE_TEST_PUZZLE.printDate}:${userId}`;
 }

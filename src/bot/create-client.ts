@@ -69,7 +69,7 @@ export function createClient(
         }
 
         try {
-            await handleWordleButton(interaction, wordleSessionStore);
+            await handleWordleButton(interaction, wordleSessionStore, wordlePuzzleProvider);
         } catch (error) {
             console.error(`버튼 처리 실패: ${interaction.customId}`, error);
             await sendErrorResponse(interaction);

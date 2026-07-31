@@ -1,7 +1,13 @@
 import { MessageFlags } from "discord.js";
 import type { ButtonInteraction } from "discord.js";
 
-import { createPublicWordleContainer, createWordleSpoilerContainer } from "./panel.js";
+import { runWordle } from "./command.js";
+import type { WordlePuzzleProvider } from "./command.js";
+import {
+    createPublicWordleContainer,
+    createWordlePlayActionRow,
+    createWordleSpoilerContainer,
+} from "./panel.js";
 import type { WordleSession, WordleSessionStore } from "./session-store.js";
 import {
     createCompletedResponse,
@@ -16,7 +22,7 @@ import {
     updatePrivateWordleState,
     wordleUserLock,
 } from "./interaction-builders.js";
-import type { ParsedWordleButton } from "./interaction-builders.js";
+import type { ParsedWordleTargetButton } from "./interaction-builders.js";
 import {
     accessWordlePublicStatusPanel,
     sendPublicWordlePanel,
@@ -25,7 +31,7 @@ import {
 
 async function handlePublicStatusPanelButton(
     interaction: ButtonInteraction,
-    parsedButton: ParsedWordleButton,
+    parsedButton: ParsedWordleTargetButton,
     store: WordleSessionStore,
 ): Promise<void> {
     const guildId = getWordleGuildId(interaction);
@@ -67,7 +73,7 @@ async function handlePublicStatusPanelButton(
 
 async function handleProgressShareButton(
     interaction: ButtonInteraction,
-    parsedButton: ParsedWordleButton,
+    parsedButton: ParsedWordleTargetButton,
     session: WordleSession,
     store: WordleSessionStore,
 ): Promise<void> {
@@ -124,7 +130,7 @@ async function handleProgressShareButton(
 
 async function handleShareButton(
     interaction: ButtonInteraction,
-    parsedButton: ParsedWordleButton,
+    parsedButton: ParsedWordleTargetButton,
     session: WordleSession,
     store: WordleSessionStore,
 ): Promise<void> {
@@ -203,7 +209,7 @@ export async function handleSpoilerButton(
 
 async function handlePublicStatusViewButton(
     interaction: ButtonInteraction,
-    parsedButton: ParsedWordleButton,
+    parsedButton: ParsedWordleTargetButton,
     store: WordleSessionStore,
 ): Promise<void> {
     const guildId = getWordleGuildId(interaction);
@@ -217,7 +223,10 @@ async function handlePublicStatusViewButton(
     }
 
     await interaction.reply({
-        components: [createPublicWordleContainer(session.game, parsedButton.userId)],
+        components: [
+            createPublicWordleContainer(session.game, parsedButton.userId),
+            createWordlePlayActionRow(),
+        ],
         flags: MessageFlags.Ephemeral | MessageFlags.IsComponentsV2,
         allowedMentions: SUPPRESSED_ALLOWED_MENTIONS,
     });
@@ -226,10 +235,19 @@ async function handlePublicStatusViewButton(
 export async function handleWordleButton(
     interaction: ButtonInteraction,
     store: WordleSessionStore = defaultWordleSessionStore,
+    puzzleProvider?: WordlePuzzleProvider,
 ): Promise<void> {
     const parsedButton = parseWordleButton(interaction.customId);
 
     if (parsedButton === undefined) {
+        return;
+    }
+
+    if (parsedButton.action === "play") {
+        await runWordle(interaction, {
+            ...(puzzleProvider === undefined ? {} : { puzzleProvider }),
+            store,
+        });
         return;
     }
 

@@ -112,6 +112,7 @@ describe("Wordle 공개 현황 패널 접근", () => {
         expect(getComponentJson(scenario.context.editReply)).toContain(
             `https://discord.com/channels/${guildId}/${channelId}/${statusMessage.id}`,
         );
+        expect(getComponentJson(scenario.send, 0, 1)).toContain('"label":"지금 플레이"');
     });
 
     it("저장된 패널 메시지가 삭제되었으면 새 패널로 복구합니다", async () => {
@@ -189,12 +190,13 @@ describe("Wordle 개인 공개 패널 전송", () => {
         expect(send).toHaveBeenCalledWith(
             expect.objectContaining({
                 allowedMentions: { users: [WORDLE_TEST_IDS.user] },
-                components: [expect.anything()],
+                components: [expect.anything(), expect.anything()],
                 flags: 32_768,
             }),
         );
         expect(getComponentJson(send)).toContain(`<@${WORDLE_TEST_IDS.user}>님의 Wordle #1860`);
         expect(getComponentJson(send)).not.toContain("내 게임 보기");
+        expect(getComponentJson(send, 0, 1)).toContain('"label":"지금 플레이"');
         expect(getCallArgument<Record<string, unknown>>(send)).not.toHaveProperty("content");
     });
 

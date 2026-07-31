@@ -10,6 +10,7 @@ import type { WordlePuzzle } from "../src/features/wordle/game.js";
 import {
     createPrivateWordleContainer,
     createPublicWordleContainer,
+    createWordlePlayActionRow,
     createWordlePublicStatusContainer,
     getFoundAlphabetCounts,
 } from "../src/commands/wordle/panel.js";
@@ -19,6 +20,20 @@ const puzzle = {
     ...WORDLE_TEST_PUZZLE,
     puzzleNumber: 1890,
 };
+
+function expectPlayButton(component: unknown): void {
+    expect(component).toMatchObject({
+        components: [
+            {
+                custom_id: "wordle:play",
+                label: "지금 플레이",
+                style: 1,
+                type: 2,
+            },
+        ],
+        type: 1,
+    });
+}
 
 describe("Wordle 게임 규칙", () => {
     it("영문 알파벳 5글자만 정규화합니다", () => {
@@ -76,6 +91,10 @@ describe("Wordle 공개 패널", () => {
         expect(panelJson).toContain("🟩🟨⬛🟨⬛");
         expect(panelJson).not.toContain("alley");
         expect(panelJson).not.toContain("apple");
+    });
+
+    it("지금 플레이 버튼을 독립된 Action Row로 생성합니다", () => {
+        expectPlayButton(createWordlePlayActionRow().toJSON());
     });
 
     it("성공한 횟수에 맞는 볼드체 성공 문구를 표시합니다", () => {

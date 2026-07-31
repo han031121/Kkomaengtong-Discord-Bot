@@ -42,11 +42,13 @@ export type WordleInteraction =
 type WordleButtonAction =
     "share" | "spoiler" | "input" | "progress-share" | "status-panel" | "status-view";
 
-export interface ParsedWordleButton {
+export interface ParsedWordleTargetButton {
     action: WordleButtonAction;
     printDate: string;
     userId: string;
 }
+
+export type ParsedWordleButton = { action: "play" } | ParsedWordleTargetButton;
 
 export interface ParsedWordleModal {
     printDate: string;
@@ -201,6 +203,10 @@ export function getWordleGuildId(interaction: WordleInteraction): string {
 }
 
 export function parseWordleButton(customId: string): ParsedWordleButton | undefined {
+    if (customId === "wordle:play") {
+        return { action: "play" };
+    }
+
     const [scope, action, printDate, userId, extraPart] = customId.split(":");
 
     if (
