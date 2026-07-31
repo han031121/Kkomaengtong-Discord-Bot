@@ -59,6 +59,32 @@ export async function sendPublicWordlePanel(
     });
 }
 
+export async function replacePublicWordlePanel(
+    interaction: WordleInteraction,
+    session: WordleSession,
+    game: WordleGame,
+): Promise<Message> {
+    const panelMessage = session.panelMessage;
+
+    if (panelMessage !== undefined) {
+        try {
+            await panelMessage.delete();
+        } catch (error) {
+            const errorCode = getDiscordErrorCode(error);
+
+            if (errorCode !== 10_003 && errorCode !== 10_008) {
+                throw error;
+            }
+
+            console.warn(
+                `기존 Wordle 개인 공개 패널이 이미 없어 새 패널을 생성합니다. Discord 오류 코드: ${errorCode}`,
+            );
+        }
+    }
+
+    return sendPublicWordlePanel(interaction, game);
+}
+
 async function resolveSendableChannel(
     interaction: WordleInteraction,
     channelId: string,

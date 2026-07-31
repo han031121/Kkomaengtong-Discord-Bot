@@ -13,7 +13,6 @@ import {
     createCompletedResponse,
     createEphemeralNoticeResponse,
     createNoticeEditResponse,
-    createPrivatePanel,
     createWordleGuessModal,
     defaultWordleSessionStore,
     getWordleGuildId,
@@ -23,11 +22,7 @@ import {
     wordleUserLock,
 } from "./interaction-builders.js";
 import type { ParsedWordleTargetButton } from "./interaction-builders.js";
-import {
-    accessWordlePublicStatusPanel,
-    sendPublicWordlePanel,
-    updatePublicWordlePanel,
-} from "./public-status.js";
+import { accessWordlePublicStatusPanel, replacePublicWordlePanel } from "./public-status.js";
 
 async function handlePublicStatusPanelButton(
     interaction: ButtonInteraction,
@@ -109,10 +104,11 @@ async function handleProgressShareButton(
             return;
         }
 
-        const panelMessage =
-            latestSession.panelMessage === undefined
-                ? await sendPublicWordlePanel(interaction, latestSession.game)
-                : await updatePublicWordlePanel(interaction, latestSession, latestSession.game);
+        const panelMessage = await replacePublicWordlePanel(
+            interaction,
+            latestSession,
+            latestSession.game,
+        );
         const sharedSession: WordleSession = {
             ...latestSession,
             panelMessage,
@@ -151,38 +147,23 @@ async function handleShareButton(
             return;
         }
 
-        if (latestSession.resultShared) {
-            await interaction.editReply({
-                components: [
-                    createPrivatePanel(
-                        latestSession,
-                        parsedButton.userId,
-                        createCompletedResponse(latestSession),
-                    ),
-                ],
-            });
-            return;
-        }
-
-        const sharedPanelMessage = await sendPublicWordlePanel(interaction, latestSession.game);
+        const sharedPanelMessage = await replacePublicWordlePanel(
+            interaction,
+            latestSession,
+            latestSession.game,
+        );
         const sharedSession: WordleSession = {
             ...latestSession,
             panelMessage: sharedPanelMessage,
-            privateResponseInteraction: interaction,
-            privateResponseMessageId: interaction.message.id,
-            resultShared: true,
         };
         store.set(parsedButton.userId, parsedButton.printDate, guildId, sharedSession);
 
-        await interaction.editReply({
-            components: [
-                createPrivatePanel(
-                    sharedSession,
-                    parsedButton.userId,
-                    createCompletedResponse(sharedSession),
-                ),
-            ],
-        });
+        await updatePrivateWordleState(
+            interaction,
+            sharedSession,
+            createCompletedResponse(sharedSession),
+            store,
+        );
     });
 }
 

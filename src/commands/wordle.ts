@@ -16,6 +16,7 @@ export { handleSpoilerButton, handleWordleButton } from "./wordle/button-handler
 export { handleWordleModal } from "./wordle/modal-handler.js";
 export {
     refreshWordlePublicStatusPanels,
+    replacePublicWordlePanel,
     replaceWordlePublicStatusPanel,
     sendPublicWordlePanel,
     updatePublicWordlePanel,

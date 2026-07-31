@@ -21,7 +21,6 @@ export interface WordleSession {
     privateResponseInteraction:
         ButtonInteraction | ChatInputCommandInteraction | ModalSubmitInteraction | undefined;
     privateResponseMessageId: string | undefined;
-    resultShared: boolean;
 }
 
 type WordleServerState = Omit<WordleSession, "game">;
@@ -54,7 +53,6 @@ export class WordleSessionStore {
             panelMessage: serverState?.panelMessage,
             privateResponseInteraction: serverState?.privateResponseInteraction,
             privateResponseMessageId: serverState?.privateResponseMessageId,
-            resultShared: serverState?.resultShared ?? false,
         };
     }
 
@@ -159,7 +157,6 @@ export class WordleSessionStore {
             printDate,
             privateResponseInteraction: session.privateResponseInteraction,
             privateResponseMessageId: session.privateResponseMessageId,
-            resultShared: session.resultShared,
             userId,
         });
     }

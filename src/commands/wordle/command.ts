@@ -76,7 +76,6 @@ export async function runWordle(
                 panelMessage: undefined,
                 privateResponseInteraction: undefined,
                 privateResponseMessageId: undefined,
-                resultShared: false,
             };
 
             if (rawGuess === undefined && existingSession?.panelMessage !== undefined) {
@@ -92,11 +91,6 @@ export async function runWordle(
                 if (existingSession !== undefined) {
                     await deletePreviousPrivateResponse(existingSession, interaction);
                 }
-
-                session = {
-                    ...session,
-                    resultShared: false,
-                };
             }
 
             store.set(interaction.user.id, puzzle.printDate, guildId, session);

@@ -48,7 +48,6 @@ export function createSession(overrides: Partial<WordleSession> = {}): WordleSes
         panelMessage: undefined,
         privateResponseInteraction: undefined,
         privateResponseMessageId: undefined,
-        resultShared: false,
         ...overrides,
     };
 }

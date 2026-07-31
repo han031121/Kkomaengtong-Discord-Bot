@@ -59,13 +59,17 @@ describe("Wordle UI 구성 요소", () => {
         });
     });
 
-    it("진행을 공유한 뒤에는 입력과 공개 현황 버튼만 표시합니다", () => {
+    it("진행을 공유한 뒤에도 현재 진행 공유 버튼을 표시합니다", () => {
         const session = createSession({
             panelMessage: { id: "panel" } as Message,
         });
 
         expect(createWordlePlayingButtons(session, userId).toJSON()).toMatchObject({
-            components: [{ label: "단어 입력" }, { label: "공개 현황 보기" }],
+            components: [
+                { label: "단어 입력" },
+                { label: "현재 진행 공유" },
+                { label: "공개 현황 보기" },
+            ],
         });
     });
 
@@ -113,20 +117,12 @@ describe("Wordle UI 구성 요소", () => {
         },
     );
 
-    it("진행 중에는 결과 버튼이 없고 이미 공유한 결과 버튼은 비활성화합니다", () => {
+    it("진행 중에는 결과 버튼을 표시하지 않습니다", () => {
         const playingSession = createSession({
             game: submitGuess(createWordleGame(puzzle), "crane"),
         });
-        const sharedSession = createSession({
-            game: submitGuess(createWordleGame(puzzle), "apple"),
-            resultShared: true,
-        });
 
         expect(createWordleResultComponents(playingSession, userId)).toEqual([]);
-        expect(createWordleResultComponents(sharedSession, userId)[0]?.toJSON()).toHaveProperty(
-            "components.0.disabled",
-            true,
-        );
     });
 
     it("실패 결과에는 활성화된 공유 버튼과 공개 현황 버튼만 표시합니다", () => {
@@ -192,41 +188,45 @@ describe("Wordle 버튼 상호작용", () => {
         expect(getComponentJson(context.editReply)).toContain("단어 입력");
     });
 
-    it("실패 결과는 같은 비공개 화면에서 한 번만 공유합니다", async () => {
+    it("결과 공유를 다시 누르면 기존 개인 공개 패널을 삭제하고 새로 공유합니다", async () => {
         const ownerId = "62345678901234567";
         const store = new WordleSessionStore();
-        const panelMessage = { id: "lost-result-panel" } as Message;
-        const send = vi.fn().mockResolvedValue(panelMessage);
+        const deletePreviousPanel = vi.fn().mockResolvedValue(undefined);
+        const previousPanelMessage = {
+            delete: deletePreviousPanel,
+            id: "previous-lost-result-panel",
+        } as unknown as Message;
+        const replacementPanelMessage = { id: "replacement-lost-result-panel" } as Message;
+        const send = vi.fn().mockResolvedValue(replacementPanelMessage);
         const context = createButtonInteraction(wordleButtonId("share", ownerId), {
             send,
             userId: ownerId,
         });
 
-        seedSession(store, { game: createLostGame() }, ownerId);
-        await handleWordleButton(context.interaction, store);
+        seedSession(store, { game: createLostGame(), panelMessage: previousPanelMessage }, ownerId);
         await handleWordleButton(context.interaction, store);
 
+        expect(deletePreviousPanel).toHaveBeenCalledOnce();
         expect(send).toHaveBeenCalledOnce();
-        expect(store.get(ownerId, puzzle.printDate, guildId)).toMatchObject({
-            panelMessage,
-            resultShared: true,
-        });
+        expect(store.get(ownerId, puzzle.printDate, guildId)?.panelMessage).toBe(
+            replacementPanelMessage,
+        );
         expect(getComponentJson(send)).toContain("종료 · X/6");
-        expect(getComponentJson(context.editReply)).toContain('"disabled":true');
+        expect(getComponentJson(context.editReply)).toContain('"label":"결과 공유"');
+        expect(getComponentJson(context.editReply)).toContain('"disabled":false');
     });
 
-    it("새 비공개 게임 화면을 열면 결과 공유 여부를 초기화합니다", async () => {
+    it("새 비공개 게임 화면에서도 결과 공유 버튼을 활성화합니다", async () => {
         const ownerId = "64345678901234567";
         const store = new WordleSessionStore();
         const context = createCommandInteraction({ userId: ownerId });
 
-        seedSession(store, { game: createLostGame(), resultShared: true }, ownerId);
+        seedSession(store, { game: createLostGame() }, ownerId);
         await runWordle(context.interaction, {
             puzzleProvider: createPuzzleProvider(),
             store,
         });
 
-        expect(store.get(ownerId, puzzle.printDate, guildId)?.resultShared).toBe(false);
         expect(getComponentJson(context.editReply)).toContain('"label":"결과 공유"');
         expect(getComponentJson(context.editReply)).toContain('"disabled":false');
     });
@@ -296,19 +296,27 @@ describe("Wordle 버튼 상호작용", () => {
         });
     });
 
-    it("현재 진행 공유 버튼은 공개 패널을 만들고 공유 버튼을 제거합니다", async () => {
+    it("현재 진행 공유를 다시 누르면 기존 패널을 삭제하고 버튼을 유지합니다", async () => {
         const store = new WordleSessionStore();
-        const panelMessage = { editable: true, id: "public-panel" } as Message;
-        const send = vi.fn().mockResolvedValue(panelMessage);
+        const deletePreviousPanel = vi.fn().mockResolvedValue(undefined);
+        const previousPanelMessage = {
+            delete: deletePreviousPanel,
+            id: "previous-public-panel",
+        } as unknown as Message;
+        const replacementPanelMessage = { id: "replacement-public-panel" } as Message;
+        const send = vi.fn().mockResolvedValue(replacementPanelMessage);
         const context = createButtonInteraction(wordleButtonId("progress-share"), { send });
 
-        seedSession(store);
+        seedSession(store, { panelMessage: previousPanelMessage });
         await handleWordleButton(context.interaction, store);
 
         expect(context.deferUpdate).toHaveBeenCalledOnce();
-        expect(store.get(userId, puzzle.printDate, guildId)?.panelMessage).toBe(panelMessage);
+        expect(deletePreviousPanel).toHaveBeenCalledOnce();
+        expect(store.get(userId, puzzle.printDate, guildId)?.panelMessage).toBe(
+            replacementPanelMessage,
+        );
         expect(getComponentJson(context.editReply)).toContain("현재 진행 상황을 공개했습니다.");
-        expect(getComponentJson(context.editReply)).not.toContain("현재 진행 공유");
+        expect(getComponentJson(context.editReply)).toContain("현재 진행 공유");
     });
 });
 

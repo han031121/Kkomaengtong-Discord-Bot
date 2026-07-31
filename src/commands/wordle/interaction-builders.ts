@@ -95,13 +95,9 @@ export function createWordlePlayingButtons(
         )
         .setLabel("현재 진행 공유")
         .setStyle(ButtonStyle.Secondary);
-    const actionRow = new ActionRowBuilder<ButtonBuilder>().addComponents(inputButton);
-
-    if (session.panelMessage === undefined) {
-        actionRow.addComponents(progressShareButton);
-    }
-
-    return actionRow.addComponents(
+    return new ActionRowBuilder<ButtonBuilder>().addComponents(
+        inputButton,
+        progressShareButton,
         createWordleStatusPanelButton(session.game.puzzle.printDate, userId),
     );
 }
@@ -135,7 +131,7 @@ export function createWordleResultButtons(
         )
         .setLabel("결과 공유")
         .setStyle(ButtonStyle.Primary)
-        .setDisabled(session.game.status === "playing" || session.resultShared);
+        .setDisabled(session.game.status === "playing");
     const spoilerButton = new ButtonBuilder()
         .setCustomId(
             createButtonCustomId(
@@ -325,14 +321,10 @@ export async function showPrivateWordleState(
     const guildId = getWordleGuildId(interaction);
     await deletePreviousPrivateResponse(session, interaction);
 
-    const privateSession: WordleSession = {
-        ...session,
-        resultShared: false,
-    };
     const response = {
         content: null,
         embeds: [],
-        components: [createPrivatePanel(privateSession, interaction.user.id, content)],
+        components: [createPrivatePanel(session, interaction.user.id, content)],
         flags: MessageFlags.IsComponentsV2 as const,
     };
     let privateResponseMessage: Message;
@@ -347,8 +339,8 @@ export async function showPrivateWordleState(
         privateResponseMessage = await interaction.fetchReply();
     }
 
-    store.set(interaction.user.id, privateSession.game.puzzle.printDate, guildId, {
-        ...privateSession,
+    store.set(interaction.user.id, session.game.puzzle.printDate, guildId, {
+        ...session,
         privateResponseInteraction: interaction,
         privateResponseMessageId: privateResponseMessage.id,
     });
