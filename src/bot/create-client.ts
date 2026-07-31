@@ -16,8 +16,7 @@ import {
     isWordleModal,
     wordleCommand,
 } from "../commands/wordle.js";
-import type { WordlePuzzleProvider } from "../commands/wordle.js";
-import type { WordleSessionStore } from "../features/wordle/session-store.js";
+import type { WordlePuzzleProvider, WordleSessionStore } from "../commands/wordle.js";
 import type { BotCommand } from "../types/command.js";
 
 export function createClient(
@@ -70,7 +69,7 @@ export function createClient(
         }
 
         try {
-            await handleWordleButton(interaction, wordleSessionStore);
+            await handleWordleButton(interaction, wordleSessionStore, wordlePuzzleProvider);
         } catch (error) {
             console.error(`버튼 처리 실패: ${interaction.customId}`, error);
             await sendErrorResponse(interaction);

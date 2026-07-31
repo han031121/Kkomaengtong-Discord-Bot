@@ -6,10 +6,10 @@ import {
     TextDisplayBuilder,
     ThumbnailBuilder,
 } from "@discordjs/builders";
-import { ButtonStyle, Colors, SeparatorSpacingSize } from "discord.js";
+import { ActionRowBuilder, ButtonStyle, Colors, SeparatorSpacingSize } from "discord.js";
 
-import { WORDLE_MAX_GUESSES } from "./game.js";
-import type { GameStatus, TileState, WordleGame } from "./game.js";
+import { WORDLE_MAX_GUESSES } from "../../features/wordle/game.js";
+import type { GameStatus, TileState, WordleGame } from "../../features/wordle/game.js";
 
 const TILE_EMOJI: Readonly<Record<TileState, string>> = {
     absent: "⬛",
@@ -67,6 +67,15 @@ function getPanelColor(status: GameStatus): number {
 
 function createSeparator(): SeparatorBuilder {
     return new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small);
+}
+
+export function createWordlePlayActionRow(): ActionRowBuilder<ButtonBuilder> {
+    return new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder()
+            .setCustomId("wordle:play")
+            .setLabel("지금 플레이")
+            .setStyle(ButtonStyle.Primary),
+    );
 }
 
 function getPublicStatusLabel(status: GameStatus): string {
@@ -199,7 +208,7 @@ export function createPublicWordleContainer(
         `### <@${userId}>님의 Wordle #${game.puzzle.puzzleNumber}`,
     );
     const gameContent = new TextDisplayBuilder().setContent(
-        [rows.join("\n"), "", "### 상태", getStatusText(game), `-# ${game.puzzle.printDate}`].join(
+        [rows.join("\n"), "", getStatusText(game), `-# ${game.puzzle.printDate}`].join(
             "\n",
         ),
     );
@@ -327,7 +336,7 @@ export function createPrivateWordleContainer(game: WordleGame, notice?: string):
                     "**알파벳**",
                     createAlphabetTiles(game),
                     "",
-                    "### 상태",
+                    "**상태**",
                     getStatusText(game),
                 ].join("\n"),
             ),

@@ -1,15 +1,12 @@
 import { MessageFlags, SlashCommandBuilder } from "discord.js";
-import type { ChatInputCommandInteraction } from "discord.js";
 
 import { createWordleGame, normalizeGuess } from "../../features/wordle/game.js";
-import type { WordleGame, WordlePuzzle } from "../../features/wordle/game.js";
+import type { WordlePuzzle } from "../../features/wordle/game.js";
 import { LocalDictionary } from "../../features/wordle/local-dictionary.js";
 import {
     WordlePuzzleUnavailableError,
     wordlePuzzleCache,
 } from "../../features/wordle/puzzle-cache.js";
-import type { WordleSessionStore } from "../../features/wordle/session-store.js";
-import type { WordleSession } from "../../features/wordle/session-store.js";
 import type { BotCommand } from "../../types/command.js";
 import {
     createCompletedResponse,
@@ -21,15 +18,24 @@ import {
     updatePrivateWordleState,
     wordleUserLock,
 } from "./interaction-builders.js";
+import type { WordleInteraction } from "./interaction-builders.js";
 import { processWordleGuess } from "./modal-handler.js";
 import type { WordleDictionary } from "./modal-handler.js";
 import { refreshWordlePublicStatusPanels, updatePublicWordlePanel } from "./public-status.js";
+import type { WordleSession, WordleSessionStore } from "./session-store.js";
 
 const localDictionary = new LocalDictionary();
 const WORDLE_GUESS_OPTION_NAME = "단어";
 
 export interface WordlePuzzleProvider {
     getTodaysPuzzle(now?: Date): WordlePuzzle;
+}
+
+export interface RunWordleOptions {
+    dictionary?: WordleDictionary;
+    guess?: string;
+    puzzleProvider?: WordlePuzzleProvider;
+    store: WordleSessionStore;
 }
 
 const data = new SlashCommandBuilder()
@@ -46,118 +52,76 @@ data.addStringOption((option) =>
         .setRequired(false),
 );
 
-function createNewWordleSession(game: WordleGame): WordleSession {
-    return {
-        game,
-        panelMessage: undefined,
-        privateResponseInteraction: undefined,
-        privateResponseMessageId: undefined,
-        resultShared: false,
-    };
-}
-
-async function registerWordleCommandParticipation(
-    interaction: ChatInputCommandInteraction,
-    printDate: string,
-    store: WordleSessionStore,
+export async function runWordle(
+    interaction: WordleInteraction,
+    options: RunWordleOptions,
 ): Promise<void> {
-    const guildId = getWordleGuildId(interaction);
+    const {
+        dictionary = localDictionary,
+        guess: rawGuess,
+        puzzleProvider = wordlePuzzleCache,
+        store,
+    } = options;
 
-    store.registerGuildParticipant(interaction.user.id, printDate, guildId);
-    await refreshWordlePublicStatusPanels(interaction, printDate, store);
-}
-
-export async function startWordleGame(
-    interaction: ChatInputCommandInteraction,
-    game: WordleGame,
-    store: WordleSessionStore,
-): Promise<void> {
-    const guildId = getWordleGuildId(interaction);
-    const existingSession = store.get(interaction.user.id, game.puzzle.printDate, guildId);
-
-    if (existingSession !== undefined) {
-        const refreshedPanelMessage =
-            existingSession.panelMessage === undefined
-                ? undefined
-                : await updatePublicWordlePanel(interaction, existingSession, existingSession.game);
-        const refreshedSession: WordleSession = {
-            ...existingSession,
-            panelMessage: refreshedPanelMessage,
-        };
-        store.set(interaction.user.id, game.puzzle.printDate, guildId, refreshedSession);
-        await registerWordleCommandParticipation(interaction, game.puzzle.printDate, store);
-
-        await showPrivateWordleState(
-            interaction,
-            refreshedSession,
-            refreshedSession.game.status === "playing"
-                ? undefined
-                : createCompletedResponse(refreshedSession),
-            store,
-        );
-        return;
-    }
-
-    const session = createNewWordleSession(game);
-    store.set(interaction.user.id, game.puzzle.printDate, guildId, session);
-    await registerWordleCommandParticipation(interaction, game.puzzle.printDate, store);
-
-    await showPrivateWordleState(interaction, session, undefined, store);
-}
-
-async function submitWordleCommandGuess(
-    interaction: ChatInputCommandInteraction,
-    game: WordleGame,
-    rawGuess: string,
-    store: WordleSessionStore,
-    dictionary: WordleDictionary,
-): Promise<void> {
-    const guildId = getWordleGuildId(interaction);
-    const existingSession = store.get(interaction.user.id, game.puzzle.printDate, guildId);
-    const session: WordleSession = {
-        ...(existingSession ?? createNewWordleSession(game)),
-        resultShared: false,
-    };
-
-    if (existingSession !== undefined) {
-        await deletePreviousPrivateResponse(existingSession, interaction);
-    }
-    store.set(interaction.user.id, game.puzzle.printDate, guildId, session);
-    await registerWordleCommandParticipation(interaction, game.puzzle.printDate, store);
-
-    const guess = normalizeGuess(rawGuess);
-
-    if (guess === undefined) {
-        await updatePrivateWordleState(
-            interaction,
-            session,
-            "영문 알파벳 5글자만 입력할 수 있습니다.",
-            store,
-        );
-        return;
-    }
-
-    await processWordleGuess(interaction, session.game.puzzle.printDate, guess, store, dictionary);
-}
-
-async function executeWordle(
-    interaction: ChatInputCommandInteraction,
-    store: WordleSessionStore,
-    puzzleProvider: WordlePuzzleProvider,
-): Promise<void> {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-    const rawGuess = interaction.options.getString(WORDLE_GUESS_OPTION_NAME);
 
     try {
         const puzzle = puzzleProvider.getTodaysPuzzle();
         const game = createWordleGame(puzzle);
         await wordleUserLock.runExclusive(interaction.user.id, async () => {
-            if (rawGuess === null) {
-                await startWordleGame(interaction, game, store);
+            const guildId = getWordleGuildId(interaction);
+            const existingSession = store.get(interaction.user.id, puzzle.printDate, guildId);
+            let session: WordleSession = existingSession ?? {
+                game,
+                panelMessage: undefined,
+                privateResponseInteraction: undefined,
+                privateResponseMessageId: undefined,
+            };
+
+            if (rawGuess === undefined && existingSession?.panelMessage !== undefined) {
+                session = {
+                    ...existingSession,
+                    panelMessage: await updatePublicWordlePanel(
+                        interaction,
+                        existingSession,
+                        existingSession.game,
+                    ),
+                };
+            } else if (rawGuess !== undefined) {
+                if (existingSession !== undefined) {
+                    await deletePreviousPrivateResponse(existingSession, interaction);
+                }
+            }
+
+            store.set(interaction.user.id, puzzle.printDate, guildId, session);
+            store.registerGuildParticipant(interaction.user.id, puzzle.printDate, guildId);
+            await refreshWordlePublicStatusPanels(interaction, puzzle.printDate, store);
+
+            if (rawGuess === undefined) {
+                await showPrivateWordleState(
+                    interaction,
+                    session,
+                    session.game.status === "playing"
+                        ? undefined
+                        : createCompletedResponse(session),
+                    store,
+                );
                 return;
             }
 
-            await submitWordleCommandGuess(interaction, game, rawGuess, store, localDictionary);
+            const guess = normalizeGuess(rawGuess);
+
+            if (guess === undefined) {
+                await updatePrivateWordleState(
+                    interaction,
+                    session,
+                    "영문 알파벳 5글자만 입력할 수 있습니다.",
+                    store,
+                );
+                return;
+            }
+
+            await processWordleGuess(interaction, puzzle.printDate, guess, store, dictionary);
         });
     } catch (error) {
         if (error instanceof WordlePuzzleUnavailableError) {
@@ -180,7 +144,15 @@ export function createWordleCommand(
 ): BotCommand {
     return {
         data,
-        execute: (interaction) => executeWordle(interaction, store, puzzleProvider),
+        execute: (interaction) => {
+            const guess = interaction.options.getString(WORDLE_GUESS_OPTION_NAME);
+
+            return runWordle(interaction, {
+                ...(guess === null ? {} : { guess }),
+                puzzleProvider,
+                store,
+            });
+        },
     };
 }
 

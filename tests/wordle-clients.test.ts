@@ -12,6 +12,26 @@ import {
     WordlePuzzleUnavailableError,
 } from "../src/features/wordle/puzzle-cache.js";
 
+const nytResponse = {
+    days_since_launch: 1890,
+    id: 42,
+    print_date: "2026-07-23",
+    solution: "CRANE",
+};
+const cachedPuzzle = {
+    id: 42,
+    printDate: "2026-07-23",
+    puzzleNumber: 1890,
+    solution: "crane",
+};
+
+function createNytResponse(overrides: Partial<typeof nytResponse> = {}, status = 200): Response {
+    return new Response(JSON.stringify({ ...nytResponse, ...overrides }), {
+        headers: { "content-type": "application/json" },
+        status,
+    });
+}
+
 afterEach(() => {
     vi.useRealTimers();
 });
@@ -25,26 +45,10 @@ describe("NYT Wordle 클라이언트", () => {
     });
 
     it("NYT 응답을 게임 퍼즐로 변환하고 같은 날짜는 캐시합니다", async () => {
-        const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
-            new Response(
-                JSON.stringify({
-                    id: 42,
-                    solution: "CRANE",
-                    print_date: "2026-07-23",
-                    days_since_launch: 1890,
-                    editor: "Wordle Editor",
-                }),
-                { status: 200, headers: { "content-type": "application/json" } },
-            ),
-        );
+        const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(createNytResponse());
         const client = new NytWordleClient(fetchMock);
 
-        await expect(client.getPuzzle("2026-07-23")).resolves.toEqual({
-            id: 42,
-            solution: "crane",
-            printDate: "2026-07-23",
-            puzzleNumber: 1890,
-        });
+        await expect(client.getPuzzle("2026-07-23")).resolves.toEqual(cachedPuzzle);
         await client.getPuzzle("2026-07-23");
 
         expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -55,19 +59,9 @@ describe("NYT Wordle 클라이언트", () => {
     });
 
     it("강제 갱신은 같은 날짜 캐시를 우회합니다", async () => {
-        const fetchMock = vi.fn<typeof fetch>().mockImplementation(() =>
-            Promise.resolve(
-                new Response(
-                    JSON.stringify({
-                        id: 42,
-                        solution: "CRANE",
-                        print_date: "2026-07-23",
-                        days_since_launch: 1890,
-                    }),
-                    { status: 200, headers: { "content-type": "application/json" } },
-                ),
-            ),
-        );
+        const fetchMock = vi
+            .fn<typeof fetch>()
+            .mockImplementation(() => Promise.resolve(createNytResponse()));
         const client = new NytWordleClient(fetchMock);
 
         await client.getPuzzle("2026-07-23", { forceRefresh: true });
@@ -86,16 +80,9 @@ describe("NYT Wordle 클라이언트", () => {
     });
 
     it("요청과 날짜가 다른 NYT 응답을 거부합니다", async () => {
-        const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
-            new Response(
-                JSON.stringify({
-                    id: 42,
-                    solution: "crane",
-                    print_date: "2026-07-22",
-                    days_since_launch: 1889,
-                }),
-            ),
-        );
+        const fetchMock = vi
+            .fn<typeof fetch>()
+            .mockResolvedValue(createNytResponse({ print_date: "2026-07-22" }));
         const client = new NytWordleClient(fetchMock);
 
         await expect(client.getPuzzle("2026-07-23")).rejects.toThrow(
@@ -105,13 +92,6 @@ describe("NYT Wordle 클라이언트", () => {
 });
 
 describe("Wordle 퍼즐 캐시", () => {
-    const cachedPuzzle = {
-        id: 42,
-        solution: "crane",
-        printDate: "2026-07-23",
-        puzzleNumber: 1890,
-    };
-
     it("refresh 때만 클라이언트를 호출하고 조회는 캐시만 읽습니다", async () => {
         const getPuzzle = vi.fn().mockResolvedValue(cachedPuzzle);
         const cache = new WordlePuzzleCache({ getPuzzle });

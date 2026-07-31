@@ -1,7 +1,7 @@
 import { createClient } from "./bot/create-client.js";
+import { WordleSessionStore } from "./commands/wordle.js";
 import { env } from "./config/env.js";
 import { WordlePuzzleCache } from "./features/wordle/puzzle-cache.js";
-import { WordleSessionStore } from "./features/wordle/session-store.js";
 
 const wordleSessionStore = new WordleSessionStore({
     databasePath: env.wordleDatabasePath,

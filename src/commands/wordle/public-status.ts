@@ -5,13 +5,9 @@ import { AsyncKeyedLock } from "../../features/wordle/async-keyed-lock.js";
 import type { WordleGame } from "../../features/wordle/game.js";
 import {
     createPublicWordleContainer,
+    createWordlePlayActionRow,
     createWordlePublicStatusContainer,
-} from "../../features/wordle/panel.js";
-import type {
-    WordlePublicStatusPanel,
-    WordleSession,
-    WordleSessionStore,
-} from "../../features/wordle/session-store.js";
+} from "./panel.js";
 import {
     defaultWordleSessionStore,
     getDiscordErrorCode,
@@ -19,6 +15,11 @@ import {
     SUPPRESSED_ALLOWED_MENTIONS,
 } from "./interaction-builders.js";
 import type { WordleInteraction } from "./interaction-builders.js";
+import type {
+    WordlePublicStatusPanel,
+    WordleSession,
+    WordleSessionStore,
+} from "./session-store.js";
 
 const publicStatusPanelLock = new AsyncKeyedLock();
 const RECOVERABLE_PANEL_ERROR_CODES = new Set([
@@ -30,12 +31,11 @@ const RECOVERABLE_PANEL_ERROR_CODES = new Set([
 ]);
 const WORDLE_PUBLIC_STATUS_PLAYER_LIMIT = 8;
 
-function createPublicPanel(interaction: WordleInteraction, game: WordleGame) {
-    return createPublicWordleContainer(
-        game,
-        interaction.user.id,
-        interaction.user.displayAvatarURL(),
-    );
+function createPublicPanelComponents(interaction: WordleInteraction, game: WordleGame) {
+    return [
+        createPublicWordleContainer(game, interaction.user.id, interaction.user.displayAvatarURL()),
+        createWordlePlayActionRow(),
+    ];
 }
 
 export async function sendPublicWordlePanel(
@@ -53,10 +53,36 @@ export async function sendPublicWordlePanel(
     }
 
     return channel.send({
-        components: [createPublicPanel(interaction, game)],
+        components: createPublicPanelComponents(interaction, game),
         flags: MessageFlags.IsComponentsV2,
         allowedMentions: { users: [interaction.user.id] },
     });
+}
+
+export async function replacePublicWordlePanel(
+    interaction: WordleInteraction,
+    session: WordleSession,
+    game: WordleGame,
+): Promise<Message> {
+    const panelMessage = session.panelMessage;
+
+    if (panelMessage !== undefined) {
+        try {
+            await panelMessage.delete();
+        } catch (error) {
+            const errorCode = getDiscordErrorCode(error);
+
+            if (errorCode !== 10_003 && errorCode !== 10_008) {
+                throw error;
+            }
+
+            console.warn(
+                `기존 Wordle 개인 공개 패널이 이미 없어 새 패널을 생성합니다. Discord 오류 코드: ${errorCode}`,
+            );
+        }
+    }
+
+    return sendPublicWordlePanel(interaction, game);
 }
 
 async function resolveSendableChannel(
@@ -83,7 +109,7 @@ async function resolveSendableChannel(
     return channel;
 }
 
-function createPublicStatusPanelComponent(
+function createPublicStatusPanelComponents(
     store: WordleSessionStore,
     guildId: string,
     printDate: string,
@@ -94,11 +120,14 @@ function createPublicStatusPanelComponent(
         WORDLE_PUBLIC_STATUS_PLAYER_LIMIT,
     );
 
-    return createWordlePublicStatusContainer(
-        recentPlayers.players,
-        recentPlayers.totalPlayers,
-        printDate,
-    );
+    return [
+        createWordlePublicStatusContainer(
+            recentPlayers.players,
+            recentPlayers.totalPlayers,
+            printDate,
+        ),
+        createWordlePlayActionRow(),
+    ];
 }
 
 async function sendPublicStatusPanelMessage(
@@ -108,7 +137,7 @@ async function sendPublicStatusPanelMessage(
     printDate: string,
 ): Promise<Message> {
     return channel.send({
-        components: [createPublicStatusPanelComponent(store, guildId, printDate)],
+        components: createPublicStatusPanelComponents(store, guildId, printDate),
         flags: MessageFlags.IsComponentsV2,
         allowedMentions: SUPPRESSED_ALLOWED_MENTIONS,
     });
@@ -319,7 +348,7 @@ async function refreshPublicStatusPanelMessage(
         await message.edit({
             content: null,
             embeds: [],
-            components: [createPublicStatusPanelComponent(store, panel.guildId, panel.printDate)],
+            components: createPublicStatusPanelComponents(store, panel.guildId, panel.printDate),
             flags: MessageFlags.IsComponentsV2,
             allowedMentions: SUPPRESSED_ALLOWED_MENTIONS,
         });
@@ -398,7 +427,7 @@ async function updateSharedWordlePanel(
         return await panelMessage.edit({
             content: null,
             embeds: [],
-            components: [createPublicPanel(interaction, game)],
+            components: createPublicPanelComponents(interaction, game),
             flags: MessageFlags.IsComponentsV2,
             allowedMentions: { users: [interaction.user.id] },
         });
@@ -482,7 +511,7 @@ export async function updatePublicWordlePanel(
         return await panelMessage.edit({
             content: null,
             embeds: [],
-            components: [createPublicPanel(interaction, game)],
+            components: createPublicPanelComponents(interaction, game),
             flags: MessageFlags.IsComponentsV2,
             allowedMentions: { users: [interaction.user.id] },
         });

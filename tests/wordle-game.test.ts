@@ -10,16 +10,30 @@ import type { WordlePuzzle } from "../src/features/wordle/game.js";
 import {
     createPrivateWordleContainer,
     createPublicWordleContainer,
+    createWordlePlayActionRow,
     createWordlePublicStatusContainer,
     getFoundAlphabetCounts,
-} from "../src/features/wordle/panel.js";
+} from "../src/commands/wordle/panel.js";
+import { createLostGame, WORDLE_TEST_PUZZLE } from "./wordle-test-helpers.js";
 
-const puzzle: WordlePuzzle = {
-    id: 1234,
-    solution: "apple",
-    printDate: "2026-07-23",
+const puzzle = {
+    ...WORDLE_TEST_PUZZLE,
     puzzleNumber: 1890,
 };
+
+function expectPlayButton(component: unknown): void {
+    expect(component).toMatchObject({
+        components: [
+            {
+                custom_id: "wordle:play",
+                label: "지금 플레이",
+                style: 1,
+                type: 2,
+            },
+        ],
+        type: 1,
+    });
+}
 
 describe("Wordle 게임 규칙", () => {
     it("영문 알파벳 5글자만 정규화합니다", () => {
@@ -47,11 +61,7 @@ describe("Wordle 게임 규칙", () => {
     });
 
     it("여섯 번 안에 맞히지 못하면 종료 상태가 됩니다", () => {
-        let game = createWordleGame(puzzle);
-
-        for (let attempt = 0; attempt < 6; attempt += 1) {
-            game = submitGuess(game, "crane");
-        }
+        const game = createLostGame(puzzle);
 
         expect(game.status).toBe("lost");
         expect(() => submitGuess(game, "apple")).toThrow("이미 종료된 Wordle 게임입니다.");
@@ -81,6 +91,10 @@ describe("Wordle 공개 패널", () => {
         expect(panelJson).toContain("🟩🟨⬛🟨⬛");
         expect(panelJson).not.toContain("alley");
         expect(panelJson).not.toContain("apple");
+    });
+
+    it("지금 플레이 버튼을 독립된 Action Row로 생성합니다", () => {
+        expectPlayButton(createWordlePlayActionRow().toJSON());
     });
 
     it("성공한 횟수에 맞는 볼드체 성공 문구를 표시합니다", () => {
@@ -181,11 +195,7 @@ describe("Wordle 공개 현황 패널", () => {
     it("게임 상태를 성공, 실패, 진행 중 글자로 표시합니다", () => {
         const playingGame = submitGuess(createWordleGame(puzzle), "alley");
         const wonGame = submitGuess(createWordleGame(puzzle), "apple");
-        let lostGame = createWordleGame(puzzle);
-
-        for (let attempt = 0; attempt < 6; attempt += 1) {
-            lostGame = submitGuess(lostGame, "crane");
-        }
+        const lostGame = createLostGame(puzzle);
 
         const panelJson = JSON.stringify(
             createWordlePublicStatusContainer(

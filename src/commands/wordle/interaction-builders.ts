@@ -16,12 +16,9 @@ import type {
 import { AsyncKeyedLock } from "../../features/wordle/async-keyed-lock.js";
 import { WORDLE_MAX_GUESSES } from "../../features/wordle/game.js";
 import type { WordleGame } from "../../features/wordle/game.js";
-import {
-    createPrivateWordleContainer,
-    createWordleNoticeContainer,
-} from "../../features/wordle/panel.js";
-import { WordleSessionStore } from "../../features/wordle/session-store.js";
-import type { WordleSession } from "../../features/wordle/session-store.js";
+import { createPrivateWordleContainer, createWordleNoticeContainer } from "./panel.js";
+import { WordleSessionStore } from "./session-store.js";
+import type { WordleSession } from "./session-store.js";
 
 const WORDLE_SHARE_BUTTON_PREFIX = "wordle:share";
 const WORDLE_SPOILER_BUTTON_PREFIX = "wordle:spoiler";
@@ -42,15 +39,16 @@ export const wordleUserLock = new AsyncKeyedLock();
 
 export type WordleInteraction =
     ChatInputCommandInteraction | ButtonInteraction | ModalSubmitInteraction;
-export type WordleGuessInteraction = ChatInputCommandInteraction | ModalSubmitInteraction;
 type WordleButtonAction =
     "share" | "spoiler" | "input" | "progress-share" | "status-panel" | "status-view";
 
-export interface ParsedWordleButton {
+export interface ParsedWordleTargetButton {
     action: WordleButtonAction;
     printDate: string;
     userId: string;
 }
+
+export type ParsedWordleButton = { action: "play" } | ParsedWordleTargetButton;
 
 export interface ParsedWordleModal {
     printDate: string;
@@ -97,13 +95,9 @@ export function createWordlePlayingButtons(
         )
         .setLabel("현재 진행 공유")
         .setStyle(ButtonStyle.Secondary);
-    const actionRow = new ActionRowBuilder<ButtonBuilder>().addComponents(inputButton);
-
-    if (session.panelMessage === undefined) {
-        actionRow.addComponents(progressShareButton);
-    }
-
-    return actionRow.addComponents(
+    return new ActionRowBuilder<ButtonBuilder>().addComponents(
+        inputButton,
+        progressShareButton,
         createWordleStatusPanelButton(session.game.puzzle.printDate, userId),
     );
 }
@@ -137,7 +131,7 @@ export function createWordleResultButtons(
         )
         .setLabel("결과 공유")
         .setStyle(ButtonStyle.Primary)
-        .setDisabled(session.game.status === "playing" || session.resultShared);
+        .setDisabled(session.game.status === "playing");
     const spoilerButton = new ButtonBuilder()
         .setCustomId(
             createButtonCustomId(
@@ -205,6 +199,10 @@ export function getWordleGuildId(interaction: WordleInteraction): string {
 }
 
 export function parseWordleButton(customId: string): ParsedWordleButton | undefined {
+    if (customId === "wordle:play") {
+        return { action: "play" };
+    }
+
     const [scope, action, printDate, userId, extraPart] = customId.split(":");
 
     if (
@@ -323,14 +321,10 @@ export async function showPrivateWordleState(
     const guildId = getWordleGuildId(interaction);
     await deletePreviousPrivateResponse(session, interaction);
 
-    const privateSession: WordleSession = {
-        ...session,
-        resultShared: false,
-    };
     const response = {
         content: null,
         embeds: [],
-        components: [createPrivatePanel(privateSession, interaction.user.id, content)],
+        components: [createPrivatePanel(session, interaction.user.id, content)],
         flags: MessageFlags.IsComponentsV2 as const,
     };
     let privateResponseMessage: Message;
@@ -345,8 +339,8 @@ export async function showPrivateWordleState(
         privateResponseMessage = await interaction.fetchReply();
     }
 
-    store.set(interaction.user.id, privateSession.game.puzzle.printDate, guildId, {
-        ...privateSession,
+    store.set(interaction.user.id, session.game.puzzle.printDate, guildId, {
+        ...session,
         privateResponseInteraction: interaction,
         privateResponseMessageId: privateResponseMessage.id,
     });
