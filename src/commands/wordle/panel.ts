@@ -336,7 +336,7 @@ export function createPrivateWordleContainer(game: WordleGame, notice?: string):
                     "**알파벳**",
                     createAlphabetTiles(game),
                     "",
-                    "### 상태",
+                    "**상태**",
                     getStatusText(game),
                 ].join("\n"),
             ),
