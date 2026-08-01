@@ -1,25 +1,16 @@
-import type { ModalSubmitInteraction } from "discord.js";
-
-import { normalizeGuess, submitGuess } from "../../features/wordle/game.js";
-import { LocalDictionary } from "../../features/wordle/local-dictionary.js";
+import { submitGuess } from "../../features/wordle/game.js";
+import type { LocalDictionary } from "../../features/wordle/local-dictionary.js";
 import {
     createCompletedResponse,
-    createEphemeralNoticeResponse,
     createNoticeEditResponse,
     createProgressResponse,
-    defaultWordleSessionStore,
     getWordleGuildId,
-    parseWordleModal,
     refreshOtherPrivateWordleStates,
     updatePrivateWordleState,
-    WORDLE_GUESS_INPUT_ID,
-    wordleUserLock,
 } from "./interaction-builders.js";
 import type { WordleInteraction } from "./interaction-builders.js";
 import { refreshSharedWordlePanels, refreshWordlePublicStatusPanels } from "./public-status.js";
 import type { WordleSession, WordleSessionStore } from "./session-store.js";
-
-const localDictionary = new LocalDictionary();
 
 export type WordleDictionary = Pick<LocalDictionary, "isEnglishWord">;
 
@@ -83,56 +74,4 @@ export async function processWordleGuess(
         refreshOtherPrivateWordleStates(interaction, updatedGame, store),
         refreshWordlePublicStatusPanels(interaction, printDate, store),
     ]);
-}
-
-export async function handleWordleModal(
-    interaction: ModalSubmitInteraction,
-    store: WordleSessionStore = defaultWordleSessionStore,
-    dictionary: WordleDictionary = localDictionary,
-): Promise<void> {
-    const parsedModal = parseWordleModal(interaction.customId);
-
-    if (parsedModal === undefined) {
-        return;
-    }
-
-    const guildId = getWordleGuildId(interaction);
-
-    if (interaction.user.id !== parsedModal.userId) {
-        await interaction.reply(
-            createEphemeralNoticeResponse(
-                "이 Wordle 단어 입력창은 게임을 진행한 사용자만 사용할 수 있습니다.",
-            ),
-        );
-        return;
-    }
-
-    const session = store.get(parsedModal.userId, parsedModal.printDate, guildId);
-
-    if (session === undefined) {
-        await interaction.reply(
-            createEphemeralNoticeResponse(
-                "Wordle 게임 정보를 찾을 수 없습니다. `/워들`로 게임을 다시 시작해 주세요.",
-            ),
-        );
-        return;
-    }
-
-    await interaction.deferUpdate();
-
-    const guess = normalizeGuess(interaction.fields.getTextInputValue(WORDLE_GUESS_INPUT_ID));
-
-    if (guess === undefined) {
-        await updatePrivateWordleState(
-            interaction,
-            session,
-            "영문 알파벳 5글자만 입력할 수 있습니다.",
-            store,
-        );
-        return;
-    }
-
-    await wordleUserLock.runExclusive(parsedModal.userId, () =>
-        processWordleGuess(interaction, parsedModal.printDate, guess, store, dictionary),
-    );
 }

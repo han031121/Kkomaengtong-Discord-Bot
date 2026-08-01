@@ -193,16 +193,26 @@ export function createButtonInteraction(customId: string, options: ButtonInterac
 
 interface ModalInteractionOptions extends InteractionOptions {
     guess?: string;
+    modalAction?: "guess" | "spoiler";
 }
 
 export function createModalInteraction(options: ModalInteractionOptions = {}) {
+    let deferred = false;
     const userId = options.userId ?? WORDLE_TEST_IDS.user;
     const send = options.send ?? vi.fn();
     const fetchMessage = options.fetchMessage ?? vi.fn();
     const fetchChannel = options.fetchChannel ?? vi.fn();
     const editReply = vi.fn().mockResolvedValue({ id: "private-message" });
-    const deferUpdate = vi.fn().mockResolvedValue(undefined);
+    const deferUpdate = vi.fn().mockImplementation(() => {
+        deferred = true;
+        return Promise.resolve();
+    });
+    const reply = vi.fn().mockResolvedValue(undefined);
+    const modalAction = options.modalAction ?? "guess";
     const interaction = {
+        get deferred() {
+            return deferred;
+        },
         channel: {
             isSendable: () => true,
             messages: { fetch: fetchMessage },
@@ -212,7 +222,7 @@ export function createModalInteraction(options: ModalInteractionOptions = {}) {
         client: {
             channels: { fetch: fetchChannel },
         },
-        customId: `wordle:guess-modal:${WORDLE_TEST_PUZZLE.printDate}:${userId}`,
+        customId: `wordle:${modalAction}-modal:${WORDLE_TEST_PUZZLE.printDate}:${userId}`,
         deferUpdate,
         editReply,
         fields: {
@@ -220,6 +230,7 @@ export function createModalInteraction(options: ModalInteractionOptions = {}) {
         },
         guildId: options.guildId ?? WORDLE_TEST_IDS.guild,
         id: "modal-interaction",
+        reply,
         user: {
             id: userId,
             displayAvatarURL: () => "https://cdn.example.com/avatar.png",
@@ -232,6 +243,7 @@ export function createModalInteraction(options: ModalInteractionOptions = {}) {
         fetchChannel,
         fetchMessage,
         interaction,
+        reply,
         send,
     };
 }

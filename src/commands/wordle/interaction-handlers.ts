@@ -1,8 +1,13 @@
 import { MessageFlags } from "discord.js";
-import type { ButtonInteraction } from "discord.js";
+import type { ButtonInteraction, ModalSubmitInteraction } from "discord.js";
+
+import { normalizeGuess } from "../../features/wordle/game.js";
+import { LocalDictionary } from "../../features/wordle/local-dictionary.js";
 
 import { runWordle } from "./command.js";
 import type { WordlePuzzleProvider } from "./command.js";
+import { processWordleGuess } from "./guess-processing.js";
+import type { WordleDictionary } from "./guess-processing.js";
 import {
     createPublicWordleContainer,
     createWordlePlayActionRow,
@@ -14,15 +19,21 @@ import {
     createEphemeralNoticeResponse,
     createNoticeEditResponse,
     createWordleGuessModal,
+    createWordleSpoilerModal,
     defaultWordleSessionStore,
     getWordleGuildId,
     parseWordleButton,
+    parseWordleModal,
     SUPPRESSED_ALLOWED_MENTIONS,
     updatePrivateWordleState,
+    WORDLE_GUESS_INPUT_ID,
+    WORDLE_SPOILER_INPUT_ID,
     wordleUserLock,
 } from "./interaction-builders.js";
 import type { ParsedWordleTargetButton } from "./interaction-builders.js";
 import { accessWordlePublicStatusPanel, replacePublicWordlePanel } from "./public-status.js";
+
+const localDictionary = new LocalDictionary();
 
 async function handlePublicStatusPanelButton(
     interaction: ButtonInteraction,
@@ -66,20 +77,12 @@ async function handlePublicStatusPanelButton(
     });
 }
 
-async function handleProgressShareButton(
+async function handleShareButton(
     interaction: ButtonInteraction,
     parsedButton: ParsedWordleTargetButton,
-    session: WordleSession,
     store: WordleSessionStore,
 ): Promise<void> {
     const guildId = getWordleGuildId(interaction);
-
-    if (session.game.status !== "playing") {
-        await interaction.reply(
-            createEphemeralNoticeResponse("진행 중인 게임만 현재 상황을 공유할 수 있습니다."),
-        );
-        return;
-    }
 
     await interaction.deferUpdate();
     await wordleUserLock.runExclusive(parsedButton.userId, async () => {
@@ -91,59 +94,6 @@ async function handleProgressShareButton(
                     "Wordle 게임 정보를 찾을 수 없습니다. `/워들`로 게임을 다시 시작해 주세요.",
                 ),
             );
-            return;
-        }
-
-        if (latestSession.game.status !== "playing") {
-            await updatePrivateWordleState(
-                interaction,
-                latestSession,
-                createCompletedResponse(latestSession),
-                store,
-            );
-            return;
-        }
-
-        const panelMessage = await replacePublicWordlePanel(
-            interaction,
-            latestSession,
-            latestSession.game,
-        );
-        const sharedSession: WordleSession = {
-            ...latestSession,
-            panelMessage,
-        };
-        store.set(parsedButton.userId, parsedButton.printDate, guildId, sharedSession);
-
-        await updatePrivateWordleState(
-            interaction,
-            sharedSession,
-            "현재 진행 상황을 공개했습니다.",
-            store,
-        );
-    });
-}
-
-async function handleShareButton(
-    interaction: ButtonInteraction,
-    parsedButton: ParsedWordleTargetButton,
-    session: WordleSession,
-    store: WordleSessionStore,
-): Promise<void> {
-    const guildId = getWordleGuildId(interaction);
-
-    if (session.game.status === "playing") {
-        await interaction.reply(
-            createEphemeralNoticeResponse("게임을 완료한 뒤 결과를 공유할 수 있습니다."),
-        );
-        return;
-    }
-
-    await interaction.deferUpdate();
-    await wordleUserLock.runExclusive(parsedButton.userId, async () => {
-        const latestSession = store.get(parsedButton.userId, parsedButton.printDate, guildId);
-
-        if (latestSession === undefined) {
             return;
         }
 
@@ -161,28 +111,34 @@ async function handleShareButton(
         await updatePrivateWordleState(
             interaction,
             sharedSession,
-            createCompletedResponse(sharedSession),
+            sharedSession.game.status === "playing"
+                ? "현재 진행 상황을 공개했습니다."
+                : createCompletedResponse(sharedSession),
             store,
         );
     });
 }
 
 export async function handleSpoilerButton(
-    interaction: ButtonInteraction,
+    interaction: ButtonInteraction | ModalSubmitInteraction,
     session: WordleSession,
+    spoilerWord: string,
 ): Promise<void> {
     const { user } = interaction;
     await interaction.deferUpdate();
 
     const channel =
-        interaction.channel ?? (await interaction.client.channels.fetch(interaction.channelId));
+        interaction.channel ??
+        (interaction.channelId === null
+            ? null
+            : await interaction.client.channels.fetch(interaction.channelId));
 
     if (channel === null || !channel.isSendable()) {
         throw new Error("Wordle 스포일러를 보낼 수 있는 채널이 아닙니다.");
     }
 
     await channel.send({
-        components: [createWordleSpoilerContainer(session.game, user.id)],
+        components: [createWordleSpoilerContainer(session.game, user.id, spoilerWord)],
         flags: MessageFlags.IsComponentsV2,
         allowedMentions: { users: [user.id] },
     });
@@ -264,11 +220,6 @@ export async function handleWordleButton(
         return;
     }
 
-    if (parsedButton.action === "progress-share") {
-        await handleProgressShareButton(interaction, parsedButton, session, store);
-        return;
-    }
-
     if (parsedButton.action === "input") {
         if (session.game.status !== "playing") {
             await interaction.reply(
@@ -284,9 +235,101 @@ export async function handleWordleButton(
     }
 
     if (parsedButton.action === "share") {
-        await handleShareButton(interaction, parsedButton, session, store);
+        await handleShareButton(interaction, parsedButton, store);
         return;
     }
 
-    await handleSpoilerButton(interaction, session);
+    if (session.game.status !== "won") {
+        await interaction.reply(
+            createEphemeralNoticeResponse("Wordle 성공 결과에서만 스포일러를 작성할 수 있습니다."),
+        );
+        return;
+    }
+
+    await interaction.showModal(
+        createWordleSpoilerModal(
+            parsedButton.printDate,
+            parsedButton.userId,
+            session.game.puzzle.solution,
+        ),
+    );
+}
+
+export async function handleWordleModal(
+    interaction: ModalSubmitInteraction,
+    store: WordleSessionStore = defaultWordleSessionStore,
+    dictionary: WordleDictionary = localDictionary,
+): Promise<void> {
+    const parsedModal = parseWordleModal(interaction.customId);
+
+    if (parsedModal === undefined) {
+        return;
+    }
+
+    const guildId = getWordleGuildId(interaction);
+
+    if (interaction.user.id !== parsedModal.userId) {
+        const inputName = parsedModal.action === "guess" ? "단어 입력창" : "스포일러 입력창";
+
+        await interaction.reply(
+            createEphemeralNoticeResponse(
+                `이 Wordle ${inputName}은 게임을 진행한 사용자만 사용할 수 있습니다.`,
+            ),
+        );
+        return;
+    }
+
+    const session = store.get(parsedModal.userId, parsedModal.printDate, guildId);
+
+    if (session === undefined) {
+        await interaction.reply(
+            createEphemeralNoticeResponse(
+                "Wordle 게임 정보를 찾을 수 없습니다. `/워들`로 게임을 다시 시작해 주세요.",
+            ),
+        );
+        return;
+    }
+
+    if (parsedModal.action === "spoiler") {
+        if (session.game.status !== "won") {
+            await interaction.reply(
+                createEphemeralNoticeResponse(
+                    "Wordle 성공 결과에서만 스포일러를 작성할 수 있습니다.",
+                ),
+            );
+            return;
+        }
+
+        const spoilerWord = normalizeGuess(
+            interaction.fields.getTextInputValue(WORDLE_SPOILER_INPUT_ID),
+        );
+
+        if (spoilerWord === undefined) {
+            await interaction.reply(
+                createEphemeralNoticeResponse("영문 알파벳 5글자만 입력할 수 있습니다."),
+            );
+            return;
+        }
+
+        await handleSpoilerButton(interaction, session, spoilerWord);
+        return;
+    }
+
+    await interaction.deferUpdate();
+
+    const guess = normalizeGuess(interaction.fields.getTextInputValue(WORDLE_GUESS_INPUT_ID));
+
+    if (guess === undefined) {
+        await updatePrivateWordleState(
+            interaction,
+            session,
+            "영문 알파벳 5글자만 입력할 수 있습니다.",
+            store,
+        );
+        return;
+    }
+
+    await wordleUserLock.runExclusive(parsedModal.userId, () =>
+        processWordleGuess(interaction, parsedModal.printDate, guess, store, dictionary),
+    );
 }

@@ -19,8 +19,8 @@ import {
     wordleUserLock,
 } from "./interaction-builders.js";
 import type { WordleInteraction } from "./interaction-builders.js";
-import { processWordleGuess } from "./modal-handler.js";
-import type { WordleDictionary } from "./modal-handler.js";
+import { processWordleGuess } from "./guess-processing.js";
+import type { WordleDictionary } from "./guess-processing.js";
 import { refreshWordlePublicStatusPanels, updatePublicWordlePanel } from "./public-status.js";
 import type { WordleSession, WordleSessionStore } from "./session-store.js";
 
