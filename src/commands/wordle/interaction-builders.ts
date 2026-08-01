@@ -23,7 +23,6 @@ import type { WordleSession } from "./session-store.js";
 const WORDLE_SHARE_BUTTON_PREFIX = "wordle:share";
 const WORDLE_SPOILER_BUTTON_PREFIX = "wordle:spoiler";
 const WORDLE_INPUT_BUTTON_PREFIX = "wordle:input";
-const WORDLE_PROGRESS_SHARE_BUTTON_PREFIX = "wordle:progress-share";
 const WORDLE_STATUS_PANEL_BUTTON_PREFIX = "wordle:status-panel";
 const WORDLE_GUESS_MODAL_PREFIX = "wordle:guess-modal";
 
@@ -39,8 +38,7 @@ export const wordleUserLock = new AsyncKeyedLock();
 
 export type WordleInteraction =
     ChatInputCommandInteraction | ButtonInteraction | ModalSubmitInteraction;
-type WordleButtonAction =
-    "share" | "spoiler" | "input" | "progress-share" | "status-panel" | "status-view";
+type WordleButtonAction = "share" | "spoiler" | "input" | "status-panel" | "status-view";
 
 export interface ParsedWordleTargetButton {
     action: WordleButtonAction;
@@ -60,7 +58,6 @@ function createButtonCustomId(
         | typeof WORDLE_SHARE_BUTTON_PREFIX
         | typeof WORDLE_SPOILER_BUTTON_PREFIX
         | typeof WORDLE_INPUT_BUTTON_PREFIX
-        | typeof WORDLE_PROGRESS_SHARE_BUTTON_PREFIX
         | typeof WORDLE_STATUS_PANEL_BUTTON_PREFIX,
     printDate: string,
     userId: string,
@@ -87,11 +84,7 @@ export function createWordlePlayingButtons(
         .setStyle(ButtonStyle.Primary);
     const progressShareButton = new ButtonBuilder()
         .setCustomId(
-            createButtonCustomId(
-                WORDLE_PROGRESS_SHARE_BUTTON_PREFIX,
-                session.game.puzzle.printDate,
-                userId,
-            ),
+            createButtonCustomId(WORDLE_SHARE_BUTTON_PREFIX, session.game.puzzle.printDate, userId),
         )
         .setLabel("현재 진행 공유")
         .setStyle(ButtonStyle.Secondary);
@@ -222,7 +215,11 @@ export function parseWordleButton(customId: string): ParsedWordleButton | undefi
         return undefined;
     }
 
-    return { action, printDate, userId };
+    return {
+        action: action === "progress-share" ? "share" : action,
+        printDate,
+        userId,
+    };
 }
 
 export function isWordleButton(customId: string): boolean {

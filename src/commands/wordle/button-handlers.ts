@@ -66,20 +66,12 @@ async function handlePublicStatusPanelButton(
     });
 }
 
-async function handleProgressShareButton(
+async function handleShareButton(
     interaction: ButtonInteraction,
     parsedButton: ParsedWordleTargetButton,
-    session: WordleSession,
     store: WordleSessionStore,
 ): Promise<void> {
     const guildId = getWordleGuildId(interaction);
-
-    if (session.game.status !== "playing") {
-        await interaction.reply(
-            createEphemeralNoticeResponse("진행 중인 게임만 현재 상황을 공유할 수 있습니다."),
-        );
-        return;
-    }
 
     await interaction.deferUpdate();
     await wordleUserLock.runExclusive(parsedButton.userId, async () => {
@@ -91,59 +83,6 @@ async function handleProgressShareButton(
                     "Wordle 게임 정보를 찾을 수 없습니다. `/워들`로 게임을 다시 시작해 주세요.",
                 ),
             );
-            return;
-        }
-
-        if (latestSession.game.status !== "playing") {
-            await updatePrivateWordleState(
-                interaction,
-                latestSession,
-                createCompletedResponse(latestSession),
-                store,
-            );
-            return;
-        }
-
-        const panelMessage = await replacePublicWordlePanel(
-            interaction,
-            latestSession,
-            latestSession.game,
-        );
-        const sharedSession: WordleSession = {
-            ...latestSession,
-            panelMessage,
-        };
-        store.set(parsedButton.userId, parsedButton.printDate, guildId, sharedSession);
-
-        await updatePrivateWordleState(
-            interaction,
-            sharedSession,
-            "현재 진행 상황을 공개했습니다.",
-            store,
-        );
-    });
-}
-
-async function handleShareButton(
-    interaction: ButtonInteraction,
-    parsedButton: ParsedWordleTargetButton,
-    session: WordleSession,
-    store: WordleSessionStore,
-): Promise<void> {
-    const guildId = getWordleGuildId(interaction);
-
-    if (session.game.status === "playing") {
-        await interaction.reply(
-            createEphemeralNoticeResponse("게임을 완료한 뒤 결과를 공유할 수 있습니다."),
-        );
-        return;
-    }
-
-    await interaction.deferUpdate();
-    await wordleUserLock.runExclusive(parsedButton.userId, async () => {
-        const latestSession = store.get(parsedButton.userId, parsedButton.printDate, guildId);
-
-        if (latestSession === undefined) {
             return;
         }
 
@@ -161,7 +100,9 @@ async function handleShareButton(
         await updatePrivateWordleState(
             interaction,
             sharedSession,
-            createCompletedResponse(sharedSession),
+            sharedSession.game.status === "playing"
+                ? "현재 진행 상황을 공개했습니다."
+                : createCompletedResponse(sharedSession),
             store,
         );
     });
@@ -264,11 +205,6 @@ export async function handleWordleButton(
         return;
     }
 
-    if (parsedButton.action === "progress-share") {
-        await handleProgressShareButton(interaction, parsedButton, session, store);
-        return;
-    }
-
     if (parsedButton.action === "input") {
         if (session.game.status !== "playing") {
             await interaction.reply(
@@ -284,7 +220,7 @@ export async function handleWordleButton(
     }
 
     if (parsedButton.action === "share") {
-        await handleShareButton(interaction, parsedButton, session, store);
+        await handleShareButton(interaction, parsedButton, store);
         return;
     }
 

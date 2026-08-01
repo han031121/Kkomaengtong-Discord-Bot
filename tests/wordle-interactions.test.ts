@@ -45,7 +45,7 @@ describe("Wordle UI 구성 요소", () => {
                     style: 1,
                 },
                 {
-                    custom_id: wordleButtonId("progress-share"),
+                    custom_id: wordleButtonId("share"),
                     label: "현재 진행 공유",
                     style: 2,
                 },
@@ -305,7 +305,7 @@ describe("Wordle 버튼 상호작용", () => {
         } as unknown as Message;
         const replacementPanelMessage = { id: "replacement-public-panel" } as Message;
         const send = vi.fn().mockResolvedValue(replacementPanelMessage);
-        const context = createButtonInteraction(wordleButtonId("progress-share"), { send });
+        const context = createButtonInteraction(wordleButtonId("share"), { send });
 
         seedSession(store, { panelMessage: previousPanelMessage });
         await handleWordleButton(context.interaction, store);
@@ -317,6 +317,19 @@ describe("Wordle 버튼 상호작용", () => {
         );
         expect(getComponentJson(context.editReply)).toContain("현재 진행 상황을 공개했습니다.");
         expect(getComponentJson(context.editReply)).toContain("현재 진행 공유");
+    });
+
+    it("기존 진행 공유 버튼도 통합된 공유 동작을 수행합니다", async () => {
+        const store = new WordleSessionStore();
+        const send = vi.fn().mockResolvedValue({ id: "legacy-progress-panel" });
+        const context = createButtonInteraction(wordleButtonId("progress-share"), { send });
+
+        seedSession(store);
+        await handleWordleButton(context.interaction, store);
+
+        expect(context.deferUpdate).toHaveBeenCalledOnce();
+        expect(send).toHaveBeenCalledOnce();
+        expect(getComponentJson(context.editReply)).toContain("현재 진행 상황을 공개했습니다.");
     });
 });
 
