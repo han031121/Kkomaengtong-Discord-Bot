@@ -25,8 +25,10 @@ const WORDLE_SPOILER_BUTTON_PREFIX = "wordle:spoiler";
 const WORDLE_INPUT_BUTTON_PREFIX = "wordle:input";
 const WORDLE_STATUS_PANEL_BUTTON_PREFIX = "wordle:status-panel";
 const WORDLE_GUESS_MODAL_PREFIX = "wordle:guess-modal";
+const WORDLE_SPOILER_MODAL_PREFIX = "wordle:spoiler-modal";
 
 export const WORDLE_GUESS_INPUT_ID = "wordle:guess";
+export const WORDLE_SPOILER_INPUT_ID = "wordle:spoiler-word";
 export const SUPPRESSED_ALLOWED_MENTIONS = {
     parse: [],
     users: [],
@@ -49,6 +51,7 @@ export interface ParsedWordleTargetButton {
 export type ParsedWordleButton = { action: "play" } | ParsedWordleTargetButton;
 
 export interface ParsedWordleModal {
+    action: "guess" | "spoiler";
     printDate: string;
     userId: string;
 }
@@ -112,6 +115,30 @@ export function createWordleGuessModal(printDate: string, userId: string): Modal
         .setCustomId(`${WORDLE_GUESS_MODAL_PREFIX}:${printDate}:${userId}`)
         .setTitle("Wordle 단어 입력")
         .addLabelComponents(guessLabel);
+}
+
+export function createWordleSpoilerModal(
+    printDate: string,
+    userId: string,
+    solution: string,
+): ModalBuilder {
+    const spoilerInput = new TextInputBuilder()
+        .setCustomId(WORDLE_SPOILER_INPUT_ID)
+        .setStyle(TextInputStyle.Short)
+        .setPlaceholder("")
+        .setValue(solution.toUpperCase())
+        .setMinLength(5)
+        .setMaxLength(5)
+        .setRequired(true);
+    const spoilerLabel = new LabelBuilder()
+        .setLabel("5글자 영단어")
+        .setDescription("스포일러로 공개할 단어를 입력해 주세요.")
+        .setTextInputComponent(spoilerInput);
+
+    return new ModalBuilder()
+        .setCustomId(`${WORDLE_SPOILER_MODAL_PREFIX}:${printDate}:${userId}`)
+        .setTitle("Wordle 스포일러 입력")
+        .addLabelComponents(spoilerLabel);
 }
 
 export function createWordleResultButtons(
@@ -231,7 +258,7 @@ export function parseWordleModal(customId: string): ParsedWordleModal | undefine
 
     if (
         scope !== "wordle" ||
-        action !== "guess-modal" ||
+        (action !== "guess-modal" && action !== "spoiler-modal") ||
         printDate === undefined ||
         !/^\d{4}-\d{2}-\d{2}$/.test(printDate) ||
         userId === undefined ||
@@ -241,7 +268,11 @@ export function parseWordleModal(customId: string): ParsedWordleModal | undefine
         return undefined;
     }
 
-    return { printDate, userId };
+    return {
+        action: action === "guess-modal" ? "guess" : "spoiler",
+        printDate,
+        userId,
+    };
 }
 
 export function isWordleModal(customId: string): boolean {

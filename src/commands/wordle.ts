@@ -6,14 +6,18 @@ export {
     createWordlePlayingButtons,
     createWordleResultButtons,
     createWordleResultComponents,
+    createWordleSpoilerModal,
     isWordleButton,
     isWordleModal,
     showPrivateWordleState,
 } from "./wordle/interaction-builders.js";
 export type { WordleInteraction } from "./wordle/interaction-builders.js";
 
-export { handleSpoilerButton, handleWordleButton } from "./wordle/button-handlers.js";
-export { handleWordleModal } from "./wordle/modal-handler.js";
+export {
+    handleSpoilerButton,
+    handleWordleButton,
+    handleWordleModal,
+} from "./wordle/interaction-handlers.js";
 export {
     refreshWordlePublicStatusPanels,
     replacePublicWordlePanel,

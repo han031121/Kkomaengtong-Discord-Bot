@@ -208,9 +208,7 @@ export function createPublicWordleContainer(
         `### <@${userId}>님의 Wordle #${game.puzzle.puzzleNumber}`,
     );
     const gameContent = new TextDisplayBuilder().setContent(
-        [rows.join("\n"), "", getStatusText(game), `-# ${game.puzzle.printDate}`].join(
-            "\n",
-        ),
+        [rows.join("\n"), "", getStatusText(game), `-# ${game.puzzle.printDate}`].join("\n"),
     );
     const container = new ContainerBuilder()
         .setAccentColor(getPanelColor(game.status))
@@ -234,7 +232,11 @@ export function createPublicWordleContainer(
     return container;
 }
 
-export function createWordleSpoilerContainer(game: WordleGame, userId: string): ContainerBuilder {
+export function createWordleSpoilerContainer(
+    game: WordleGame,
+    userId: string,
+    spoilerWord: string,
+): ContainerBuilder {
     return new ContainerBuilder()
         .setAccentColor(Colors.Red)
         .addTextDisplayComponents(
@@ -244,7 +246,7 @@ export function createWordleSpoilerContainer(game: WordleGame, userId: string): 
         .addTextDisplayComponents(
             new TextDisplayBuilder().setContent(
                 [
-                    `# ${[...game.puzzle.solution.toUpperCase()].join(" ")}`,
+                    `# ${[...spoilerWord.toUpperCase()].join(" ")}`,
                     `-# Wordle #${game.puzzle.puzzleNumber} · ${game.puzzle.printDate}`,
                 ].join("\n"),
             ),

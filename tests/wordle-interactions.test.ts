@@ -6,6 +6,7 @@ import {
     createWordlePlayingButtons,
     createWordleResultButtons,
     createWordleResultComponents,
+    createWordleSpoilerModal,
     handleSpoilerButton,
     handleWordleButton,
     handleWordleModal,
@@ -86,6 +87,20 @@ describe("Wordle UI 구성 요소", () => {
         expect(serialized).toContain('"max_length":5');
     });
 
+    it("스포일러 입력 모달에 5글자 영단어 입력란을 생성합니다", () => {
+        const modal = createWordleSpoilerModal(puzzle.printDate, userId, puzzle.solution).toJSON();
+        const serialized = JSON.stringify(modal);
+
+        expect(modal).toMatchObject({
+            custom_id: `wordle:spoiler-modal:${puzzle.printDate}:${userId}`,
+            title: "Wordle 스포일러 입력",
+        });
+        expect(serialized).toContain("5글자 영단어");
+        expect(serialized).toContain('"min_length":5');
+        expect(serialized).toContain('"max_length":5');
+        expect(serialized).toContain('"value":"APPLE"');
+    });
+
     it.each([undefined, { id: "panel" } as Message])(
         "성공 결과에는 공유·스포일러·공개 현황 버튼을 생성합니다",
         (panelMessage) => {
@@ -162,7 +177,9 @@ describe("Wordle 식별자 검증", () => {
 
     it.each([
         ["wordle:guess-modal:2026-07-23:12345678901234567", true],
+        ["wordle:spoiler-modal:2026-07-23:12345678901234567", true],
         ["wordle:guess-modal:wrong-date:12345678901234567", false],
+        ["wordle:spoiler-modal:wrong-date:12345678901234567", false],
         ["wordle:input:2026-07-23:12345678901234567", false],
     ])("%s 모달 식별자 검증 결과는 %s입니다", (customId, expected) => {
         expect(isWordleModal(customId)).toBe(expected);
@@ -262,24 +279,26 @@ describe("Wordle 버튼 상호작용", () => {
         expect(getComponentJson(context.reply, 0, 1)).toContain('"label":"지금 플레이"');
     });
 
-    it("스포일러는 비공개 응답이 아닌 채널의 빨간 컨테이너로 전송합니다", async () => {
+    it("스포일러 버튼은 단어를 바로 공개하지 않고 입력 모달을 표시합니다", async () => {
+        const store = new WordleSessionStore();
         const send = vi.fn().mockResolvedValue({ id: "spoiler-message" });
         const context = createButtonInteraction(wordleButtonId("spoiler"), { send });
-        const session = createSession({
+
+        seedSession(store, {
             game: submitGuess(createWordleGame(puzzle), "apple"),
         });
+        await handleWordleButton(context.interaction, store);
 
-        await handleSpoilerButton(context.interaction, session);
-
-        expect(context.deferUpdate).toHaveBeenCalledOnce();
-        expect(context.reply).not.toHaveBeenCalled();
-        expect(send).toHaveBeenCalledWith({
-            allowedMentions: { users: [userId] },
-            components: [expect.anything()],
-            flags: 32_768,
+        expect(context.showModal).toHaveBeenCalledOnce();
+        expect(getCallArgument<{ toJSON(): unknown }>(context.showModal).toJSON()).toMatchObject({
+            custom_id: `wordle:spoiler-modal:${puzzle.printDate}:${userId}`,
+            title: "Wordle 스포일러 입력",
         });
-        expect(getComponentJson(send)).toContain(`<@${userId}>님의 스포일러`);
-        expect(getComponentJson(send)).toContain("# A P P L E");
+        expect(
+            JSON.stringify(getCallArgument<{ toJSON(): unknown }>(context.showModal).toJSON()),
+        ).toContain('"value":"APPLE"');
+        expect(context.deferUpdate).not.toHaveBeenCalled();
+        expect(send).not.toHaveBeenCalled();
     });
 
     it("단어 입력 버튼은 해당 사용자의 입력 모달을 표시합니다", async () => {
@@ -361,6 +380,88 @@ describe("Wordle 비공개 화면", () => {
 });
 
 describe("Wordle 모달 입력", () => {
+    it("handleSpoilerButton은 정답 대신 전달받은 단어를 기존 외관으로 전송합니다", async () => {
+        const send = vi.fn().mockResolvedValue({ id: "spoiler-message" });
+        const context = createModalInteraction({ modalAction: "spoiler", send });
+        const session = createSession({
+            game: submitGuess(createWordleGame(puzzle), "apple"),
+        });
+
+        await handleSpoilerButton(context.interaction, session, "crane");
+
+        expect(context.deferUpdate).toHaveBeenCalledOnce();
+        expect(context.reply).not.toHaveBeenCalled();
+        expect(send).toHaveBeenCalledWith({
+            allowedMentions: { users: [userId] },
+            components: [expect.anything()],
+            flags: 32_768,
+        });
+        expect(getComponentJson(send)).toContain(`<@${userId}>님의 스포일러`);
+        expect(getComponentJson(send)).toContain("# C R A N E");
+        expect(getComponentJson(send)).not.toContain("# A P P L E");
+    });
+
+    it("스포일러 모달의 유효한 단어를 채널에 전송합니다", async () => {
+        const store = new WordleSessionStore();
+        const send = vi.fn().mockResolvedValue({ id: "spoiler-message" });
+        const context = createModalInteraction({
+            guess: "CRANE",
+            modalAction: "spoiler",
+            send,
+        });
+        const dictionary = createDictionary();
+
+        seedSession(store, {
+            game: submitGuess(createWordleGame(puzzle), "apple"),
+        });
+        await handleWordleModal(context.interaction, store, dictionary);
+
+        expect(dictionary.isEnglishWord).not.toHaveBeenCalled();
+        expect(context.deferUpdate).toHaveBeenCalledOnce();
+        expect(context.reply).not.toHaveBeenCalled();
+        expect(getComponentJson(send)).toContain("# C R A N E");
+    });
+
+    it("사전에 없는 스포일러 단어도 공개합니다", async () => {
+        const store = new WordleSessionStore();
+        const context = createModalInteraction({
+            guess: "ZZZZZ",
+            modalAction: "spoiler",
+        });
+        const dictionary = createDictionary(false);
+
+        seedSession(store, {
+            game: submitGuess(createWordleGame(puzzle), "apple"),
+        });
+        await handleWordleModal(context.interaction, store, dictionary);
+
+        expect(dictionary.isEnglishWord).not.toHaveBeenCalled();
+        expect(context.deferUpdate).toHaveBeenCalledOnce();
+        expect(context.reply).not.toHaveBeenCalled();
+        expect(getComponentJson(context.send)).toContain("# Z Z Z Z Z");
+    });
+
+    it("영문 알파벳 5글자가 아닌 스포일러 문자열은 공개하지 않습니다", async () => {
+        const store = new WordleSessionStore();
+        const context = createModalInteraction({
+            guess: "AB12!",
+            modalAction: "spoiler",
+        });
+        const dictionary = createDictionary();
+
+        seedSession(store, {
+            game: submitGuess(createWordleGame(puzzle), "apple"),
+        });
+        await handleWordleModal(context.interaction, store, dictionary);
+
+        expect(dictionary.isEnglishWord).not.toHaveBeenCalled();
+        expect(context.deferUpdate).not.toHaveBeenCalled();
+        expect(context.send).not.toHaveBeenCalled();
+        expect(getComponentJson(context.reply)).toContain(
+            "영문 알파벳 5글자만 입력할 수 있습니다.",
+        );
+    });
+
     it("사전에 없는 단어는 횟수와 활동 순번을 차감하지 않습니다", async () => {
         const store = new WordleSessionStore();
         const context = createModalInteraction({ guess: "zzzzz" });
