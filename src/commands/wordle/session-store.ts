@@ -115,7 +115,7 @@ export class WordleSessionStore {
         userId: string,
         printDate: string,
         guildId: string,
-        message: Message,
+        message: Message | undefined,
     ): void {
         const key = this.createServerKey(userId, printDate, guildId);
         const state = this.serverStates.get(key);

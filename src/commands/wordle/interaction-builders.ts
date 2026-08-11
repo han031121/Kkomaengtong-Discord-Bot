@@ -71,7 +71,7 @@ function createButtonCustomId(
 function createWordleStatusPanelButton(printDate: string, userId: string): ButtonBuilder {
     return new ButtonBuilder()
         .setCustomId(createButtonCustomId(WORDLE_STATUS_PANEL_BUTTON_PREFIX, printDate, userId))
-        .setLabel("공개 현황 보기")
+        .setLabel("점수판")
         .setStyle(ButtonStyle.Secondary);
 }
 
@@ -89,7 +89,7 @@ export function createWordlePlayingButtons(
         .setCustomId(
             createButtonCustomId(WORDLE_SHARE_BUTTON_PREFIX, session.game.puzzle.printDate, userId),
         )
-        .setLabel("현재 진행 공유")
+        .setLabel("현황 공유")
         .setStyle(ButtonStyle.Secondary);
     return new ActionRowBuilder<ButtonBuilder>().addComponents(
         inputButton,

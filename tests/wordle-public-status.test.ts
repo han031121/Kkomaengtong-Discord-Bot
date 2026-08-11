@@ -211,24 +211,26 @@ describe("Wordle 개인 공개 패널 전송", () => {
             edit: vi.fn().mockRejectedValue({ code: "10008" }),
             name: "삭제된",
         },
-    ])("$name 기존 패널은 새 메시지로 교체합니다", async ({ edit, editable }) => {
-        const replacementMessage = { id: "replacement-message" } as Message;
-        const send = vi.fn().mockResolvedValue(replacementMessage);
-        const context = createCommandInteraction({ send });
-        const game = submitGuess(createWordleGame(puzzle), "crane");
-        const session = createSession({
-            game,
-            panelMessage: {
-                edit,
-                editable,
-            } as unknown as Message,
-        });
+    ])(
+        "$name 기존 패널은 새 메시지를 생성하지 않고 갱신을 중단합니다",
+        async ({ edit, editable }) => {
+            const send = vi.fn();
+            const context = createCommandInteraction({ send });
+            const game = submitGuess(createWordleGame(puzzle), "crane");
+            const session = createSession({
+                game,
+                panelMessage: {
+                    edit,
+                    editable,
+                } as unknown as Message,
+            });
 
-        await expect(updatePublicWordlePanel(context.interaction, session, game)).resolves.toBe(
-            replacementMessage,
-        );
+            await expect(
+                updatePublicWordlePanel(context.interaction, session, game),
+            ).resolves.toBeUndefined();
 
-        expect(edit).toHaveBeenCalledTimes(editable ? 1 : 0);
-        expect(send).toHaveBeenCalledOnce();
-    });
+            expect(edit).toHaveBeenCalledTimes(editable ? 1 : 0);
+            expect(send).not.toHaveBeenCalled();
+        },
+    );
 });

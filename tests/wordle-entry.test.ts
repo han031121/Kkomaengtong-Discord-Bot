@@ -44,8 +44,8 @@ describe("Wordle 실행 진입점", () => {
         expect(getCallArgument<{ flags: number }>(context.editReply).flags).toBe(32_768);
         expect(getComponentJson(context.editReply)).toContain("### 나의 Wordle #1860");
         expect(getComponentJson(context.editReply)).toContain("단어 입력");
-        expect(getComponentJson(context.editReply)).toContain("현재 진행 공유");
-        expect(getComponentJson(context.editReply)).toContain("공개 현황 보기");
+        expect(getComponentJson(context.editReply)).toContain("현황 공유");
+        expect(getComponentJson(context.editReply)).toContain("점수판");
     });
 
     it("버튼도 공용 진입점에서 같은 비공개 화면과 서버 참여 상태를 생성합니다", async () => {

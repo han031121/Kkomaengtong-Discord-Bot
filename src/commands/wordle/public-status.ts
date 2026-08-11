@@ -417,10 +417,12 @@ async function updateSharedWordlePanel(
     interaction: WordleInteraction,
     panelMessage: Message,
     game: WordleGame,
-): Promise<Message> {
+): Promise<Message | undefined> {
     if (!panelMessage.editable) {
-        console.warn("다른 서버의 기존 Wordle 패널을 수정할 수 없습니다.");
-        return panelMessage;
+        console.warn(
+            "다른 서버의 기존 Wordle 현황 공유 메시지를 수정할 수 없어 자동 갱신을 중단합니다.",
+        );
+        return undefined;
     }
 
     try {
@@ -439,9 +441,9 @@ async function updateSharedWordlePanel(
         }
 
         console.warn(
-            `다른 서버의 Wordle 패널을 수정하지 못했습니다. Discord 오류 코드: ${errorCode}`,
+            `다른 서버의 기존 Wordle 현황 공유 메시지를 찾거나 수정하지 못해 자동 갱신을 중단합니다. Discord 오류 코드: ${errorCode}`,
         );
-        return panelMessage;
+        return undefined;
     }
 }
 
@@ -460,7 +462,7 @@ export async function refreshSharedWordlePanels(
             continue;
         }
 
-        let updatedMessage: Message;
+        let updatedMessage: Message | undefined;
 
         try {
             updatedMessage =
@@ -495,7 +497,7 @@ export async function updatePublicWordlePanel(
     interaction: WordleInteraction,
     session: WordleSession,
     game: WordleGame,
-): Promise<Message> {
+): Promise<Message | undefined> {
     const panelMessage = session.panelMessage;
 
     if (panelMessage === undefined) {
@@ -503,8 +505,8 @@ export async function updatePublicWordlePanel(
     }
 
     if (!panelMessage.editable) {
-        console.warn("기존 Wordle 패널을 수정할 수 없어 새 공개 패널을 생성합니다.");
-        return sendPublicWordlePanel(interaction, game);
+        console.warn("기존 Wordle 현황 공유 메시지를 수정할 수 없어 자동 갱신을 중단합니다.");
+        return undefined;
     }
 
     try {
@@ -523,8 +525,8 @@ export async function updatePublicWordlePanel(
         }
 
         console.warn(
-            `기존 Wordle 패널을 수정하지 못해 새 공개 패널을 생성합니다. Discord 오류 코드: ${errorCode}`,
+            `기존 Wordle 현황 공유 메시지를 찾거나 수정하지 못해 자동 갱신을 중단합니다. Discord 오류 코드: ${errorCode}`,
         );
-        return sendPublicWordlePanel(interaction, game);
+        return undefined;
     }
 }
