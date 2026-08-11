@@ -1,8 +1,7 @@
 import { MessageFlags } from "discord.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createWordleRefreshTestCommand } from "../src/commands/wordle-refresh-test.js";
-import { WordleSessionStore } from "../src/commands/wordle.js";
+import { createWordleCommand, WordleSessionStore } from "../src/commands/wordle.js";
 import { LocalDictionary } from "../src/features/wordle/local-dictionary.js";
 import {
     formatDateInTimeZone,
@@ -220,6 +219,34 @@ describe("Wordle 퍼즐 캐시", () => {
 });
 
 describe("Wordle 갱신 테스트 명령어", () => {
+    it.each(["갱신_test", "어제기록_test"] as const)(
+        "메인 봇에서는 %s 서브커맨드 실행을 거부합니다",
+        async (subcommand) => {
+            const store = new WordleSessionStore();
+            const getTodaysPuzzle = vi.fn(() => WORDLE_TEST_PUZZLE);
+            const refreshForDateChangeTest = vi.fn();
+            const puzzleRefresher = {
+                getTodaysPuzzle,
+                refreshForDateChangeTest,
+            };
+            const context = createCommandInteraction({ subcommand });
+
+            try {
+                await expect(
+                    createWordleCommand(store, puzzleRefresher, puzzleRefresher).execute(
+                        context.interaction,
+                    ),
+                ).rejects.toThrow(
+                    `운영 환경에서 사용할 수 없는 Wordle 명령어입니다: ${subcommand}`,
+                );
+                expect(getTodaysPuzzle).not.toHaveBeenCalled();
+                expect(refreshForDateChangeTest).not.toHaveBeenCalled();
+            } finally {
+                store.close();
+            }
+        },
+    );
+
     it("외부 캐시를 강제로 갱신하고 날짜 전환 처리 결과를 안내합니다", async () => {
         const store = new WordleSessionStore();
         const previousPuzzle = {
@@ -240,13 +267,16 @@ describe("Wordle 갱신 테스트 명령어", () => {
                 return Promise.resolve(WORDLE_TEST_PUZZLE);
             },
         );
-        const context = createCommandInteraction();
+        const context = createCommandInteraction({ subcommand: "갱신_test" });
+        const puzzleRefresher = {
+            getTodaysPuzzle,
+            refreshForDateChangeTest,
+        };
 
         try {
-            await createWordleRefreshTestCommand(store, {
-                getTodaysPuzzle,
-                refreshForDateChangeTest,
-            }).execute(context.interaction);
+            await createWordleCommand(store, puzzleRefresher, puzzleRefresher, true).execute(
+                context.interaction,
+            );
 
             expect(context.deferReply).toHaveBeenCalledWith({ flags: MessageFlags.Ephemeral });
             expect(getTodaysPuzzle).toHaveBeenCalledOnce();
@@ -285,13 +315,16 @@ describe("Wordle 갱신 테스트 명령어", () => {
             .fn()
             .mockRejectedValue(new Error("service unavailable"));
         const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-        const context = createCommandInteraction();
+        const context = createCommandInteraction({ subcommand: "갱신_test" });
+        const puzzleRefresher = {
+            getTodaysPuzzle,
+            refreshForDateChangeTest,
+        };
 
         try {
-            await createWordleRefreshTestCommand(store, {
-                getTodaysPuzzle,
-                refreshForDateChangeTest,
-            }).execute(context.interaction);
+            await createWordleCommand(store, puzzleRefresher, puzzleRefresher, true).execute(
+                context.interaction,
+            );
 
             expect(context.deferReply).toHaveBeenCalledWith({ flags: MessageFlags.Ephemeral });
             expect(context.editReply).toHaveBeenCalledWith({

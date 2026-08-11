@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Mock } from "vitest";
 
 import {
+    createWordleCommand,
     createYesterdayWordleRecordResponse,
     handleWordleButton,
     publishPendingYesterdayWordleRecords,
@@ -10,8 +11,6 @@ import {
     updatePublicWordlePanel,
     WordleSessionStore,
 } from "../src/commands/wordle.js";
-import { createWordleRefreshTestCommand } from "../src/commands/wordle-refresh-test.js";
-import { createYesterdayWordleTestCommand } from "../src/commands/yesterday-wordle-test.js";
 import { createWordleGame, submitGuess } from "../src/features/wordle/game.js";
 import { WordlePuzzleCache } from "../src/features/wordle/puzzle-cache.js";
 import {
@@ -324,12 +323,14 @@ describe("어제 Wordle 기록판", () => {
         store.close();
     });
 
-    it("/어제워들_test는 현재 채널에 어제 기록판을 출력합니다", async () => {
+    it("/워들 어제기록_test는 현재 채널에 어제 기록판을 출력합니다", async () => {
         const store = createStoreWithYesterdayRecord();
-        const context = createCommandInteraction();
-        const command = createYesterdayWordleTestCommand(
+        const context = createCommandInteraction({ subcommand: "어제기록_test" });
+        const command = createWordleCommand(
             store,
             createPuzzleProvider(currentPuzzle),
+            undefined,
+            true,
         );
 
         await command.execute(context.interaction);
@@ -346,7 +347,7 @@ describe("어제 Wordle 기록판", () => {
         store.close();
     });
 
-    it("/워들갱신_test는 자정과 동일한 퍼즐 전환 경로로 어제 기록판을 전송합니다", async () => {
+    it("/워들 갱신_test는 자정과 동일한 퍼즐 전환 경로로 어제 기록판을 전송합니다", async () => {
         vi.useFakeTimers();
         vi.setSystemTime(new Date("2026-07-23T15:30:00.000Z"));
 
@@ -365,7 +366,10 @@ describe("어제 Wordle 기록판", () => {
             isSendable: () => true,
             send,
         });
-        const context = createCommandInteraction({ fetchChannel });
+        const context = createCommandInteraction({
+            fetchChannel,
+            subcommand: "갱신_test",
+        });
         const getPuzzle = vi.fn().mockResolvedValue(currentPuzzle);
         const cache = new WordlePuzzleCache({ getPuzzle });
 
@@ -381,7 +385,7 @@ describe("어제 Wordle 기록판", () => {
         });
 
         try {
-            await createWordleRefreshTestCommand(store, cache).execute(context.interaction);
+            await createWordleCommand(store, cache, cache, true).execute(context.interaction);
 
             expect(getPuzzle).toHaveBeenCalledTimes(2);
             expect(fetchChannel).toHaveBeenCalledWith(WORDLE_TEST_IDS.channel);

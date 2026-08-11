@@ -27,7 +27,7 @@ const { guild: guildId } = WORDLE_TEST_IDS;
 const puzzle = WORDLE_TEST_PUZZLE;
 
 describe("Wordle 실행 진입점", () => {
-    it("/워들은 공개 메시지 없이 비공개 게임 화면과 서버 참여 상태를 생성합니다", async () => {
+    it("/워들 플레이는 공개 메시지 없이 비공개 게임 화면과 서버 참여 상태를 생성합니다", async () => {
         const userId = "32345678901234567";
         const store = new WordleSessionStore();
         const puzzleProvider = createPuzzleProvider();
@@ -67,11 +67,12 @@ describe("Wordle 실행 진입점", () => {
         expect(getComponentJson(context.editReply)).toContain("단어 입력");
     });
 
-    it("/워들의 단어 옵션은 모달 없이 정규화한 추측을 제출합니다", async () => {
+    it("/워들 입력은 모달 없이 정규화한 추측을 제출합니다", async () => {
         const store = new WordleSessionStore();
         const context = createCommandInteraction({
             guess: "CRANE",
             guildId: "93345678901234567",
+            subcommand: "입력",
             userId: "92345678901234567",
         });
         const dictionaryRequest = vi
@@ -89,7 +90,7 @@ describe("Wordle 실행 진입점", () => {
         }
     });
 
-    it("/워들만 실행해도 기존 공개 현황 패널에 0/6 참여 상태를 반영합니다", async () => {
+    it("/워들 플레이만 실행해도 기존 공개 현황 패널에 0/6 참여 상태를 반영합니다", async () => {
         const userId = "34345678901234567";
         const channelId = "44345678901234567";
         const statusMessageId = "54345678901234567";
@@ -128,6 +129,35 @@ describe("Wordle 실행 진입점", () => {
         expect(getComponentJson(context.editReply)).toContain(
             "오늘의 Wordle이 아직 준비되지 않았습니다.",
         );
+    });
+
+    it("/워들 점수판은 오늘의 공개 점수판과 이동 링크를 표시합니다", async () => {
+        const messageId = "62345678901234567";
+        const send = vi.fn().mockResolvedValue({ id: messageId });
+        const store = new WordleSessionStore();
+        const context = createCommandInteraction({ send, subcommand: "점수판" });
+
+        await createWordleCommand(store, createPuzzleProvider()).execute(context.interaction);
+
+        expect(context.deferReply).toHaveBeenCalledWith({ flags: 64 });
+        expect(getComponentJson(send)).toContain("### 오늘의 Wordle 점수판");
+        expect(getComponentJson(send)).toContain("아직 Wordle에 참여한 사용자가 없습니다.");
+        expect(getComponentJson(context.editReply)).toContain(
+            `https://discord.com/channels/${guildId}/${WORDLE_TEST_IDS.channel}/${messageId}`,
+        );
+    });
+
+    it("/워들 기록은 임시 준비 안내를 표시합니다", async () => {
+        const context = createCommandInteraction({ subcommand: "기록" });
+
+        await createWordleCommand(new WordleSessionStore(), createPuzzleProvider()).execute(
+            context.interaction,
+        );
+
+        expect(context.reply).toHaveBeenCalledWith({
+            content: "Wordle 기록 기능은 준비 중입니다.",
+            flags: 64,
+        });
     });
 });
 

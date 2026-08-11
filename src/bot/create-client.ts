@@ -7,7 +7,7 @@ import type {
     RepliableInteraction,
 } from "discord.js";
 
-import { commands } from "../commands/index.js";
+import { createCommands } from "../commands/index.js";
 import {
     createWordleCommand,
     handleWordleButton,
@@ -17,25 +17,18 @@ import {
     wordleCommand,
 } from "../commands/wordle.js";
 import type { WordlePuzzleProvider, WordleSessionStore } from "../commands/wordle.js";
-import {
-    createWordleRefreshTestCommand,
-    wordleRefreshTestCommand,
-} from "../commands/wordle-refresh-test.js";
 import type { WordlePuzzleRefresher } from "../commands/wordle-refresh-test.js";
-import {
-    createYesterdayWordleTestCommand,
-    yesterdayWordleTestCommand,
-} from "../commands/yesterday-wordle-test.js";
 import type { BotCommand } from "../types/command.js";
 
 export function createClient(
     wordleSessionStore?: WordleSessionStore,
     wordlePuzzleProvider?: WordlePuzzleProvider & WordlePuzzleRefresher,
+    enableTestCommands = false,
 ): Client {
     const client = new Client({ intents: [GatewayIntentBits.Guilds] });
     const commandMap = new Collection<string, BotCommand>();
 
-    for (const command of commands) {
+    for (const command of createCommands(enableTestCommands)) {
         const commandName = command.data.name;
 
         if (commandMap.has(commandName)) {
@@ -48,18 +41,12 @@ export function createClient(
     if (wordleSessionStore !== undefined) {
         commandMap.set(
             wordleCommand.data.name,
-            createWordleCommand(wordleSessionStore, wordlePuzzleProvider),
-        );
-        commandMap.set(
-            yesterdayWordleTestCommand.data.name,
-            createYesterdayWordleTestCommand(wordleSessionStore, wordlePuzzleProvider),
-        );
-    }
-
-    if (wordlePuzzleProvider !== undefined) {
-        commandMap.set(
-            wordleRefreshTestCommand.data.name,
-            createWordleRefreshTestCommand(wordleSessionStore, wordlePuzzleProvider),
+            createWordleCommand(
+                wordleSessionStore,
+                wordlePuzzleProvider,
+                wordlePuzzleProvider,
+                enableTestCommands,
+            ),
         );
     }
 

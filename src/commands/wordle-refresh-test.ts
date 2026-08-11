@@ -1,11 +1,8 @@
-import { MessageFlags, SlashCommandBuilder } from "discord.js";
+import { MessageFlags } from "discord.js";
 import type { ChatInputCommandInteraction } from "discord.js";
 
 import { getPreviousWordlePrintDate } from "../features/wordle/data-store.js";
 import type { WordlePuzzle } from "../features/wordle/game.js";
-import { wordlePuzzleCache } from "../features/wordle/puzzle-cache.js";
-import type { BotCommand } from "../types/command.js";
-import { defaultWordleSessionStore } from "./wordle/interaction-builders.js";
 import type { WordleSessionStore } from "./wordle/session-store.js";
 
 export interface WordlePuzzleRefresher {
@@ -16,11 +13,6 @@ export interface WordlePuzzleRefresher {
         now?: Date,
     ): Promise<WordlePuzzle>;
 }
-
-const data = new SlashCommandBuilder()
-    .setName("워들갱신_test")
-    .setDescription("오늘의 Wordle 정답 캐시를 강제로 갱신합니다.")
-    .setDMPermission(false);
 
 export async function runWordleRefreshTest(
     interaction: ChatInputCommandInteraction,
@@ -58,15 +50,3 @@ export async function runWordleRefreshTest(
         });
     }
 }
-
-export function createWordleRefreshTestCommand(
-    store: WordleSessionStore = defaultWordleSessionStore,
-    puzzleRefresher: WordlePuzzleRefresher = wordlePuzzleCache,
-): BotCommand {
-    return {
-        data,
-        execute: (interaction) => runWordleRefreshTest(interaction, store, puzzleRefresher),
-    };
-}
-
-export const wordleRefreshTestCommand = createWordleRefreshTestCommand();

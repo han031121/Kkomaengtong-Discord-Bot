@@ -33,7 +33,7 @@ export async function processWordleGuess(
     if (currentSession === undefined) {
         await interaction.editReply(
             createNoticeEditResponse(
-                "Wordle 게임 정보를 찾을 수 없습니다. `/워들`로 게임을 다시 시작해 주세요.",
+                "Wordle 게임 정보를 찾을 수 없습니다. `/워들 플레이`로 게임을 다시 시작해 주세요.",
             ),
         );
         return;

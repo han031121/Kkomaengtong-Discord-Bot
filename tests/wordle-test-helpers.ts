@@ -82,6 +82,7 @@ interface InteractionOptions {
 interface CommandInteractionOptions extends InteractionOptions {
     deferred?: boolean;
     guess?: string | null;
+    subcommand?: "갱신_test" | "기록" | "어제기록_test" | "입력" | "점수판" | "플레이";
 }
 
 export function createCommandInteraction(options: CommandInteractionOptions = {}) {
@@ -113,6 +114,7 @@ export function createCommandInteraction(options: CommandInteractionOptions = {}
         editReply,
         guildId: options.guildId ?? WORDLE_TEST_IDS.guild,
         options: {
+            getSubcommand: () => options.subcommand ?? "플레이",
             getString: () => options.guess ?? null,
         },
         reply,

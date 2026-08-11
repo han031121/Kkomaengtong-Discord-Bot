@@ -1,4 +1,11 @@
-export { createWordleCommand, runWordle, wordleCommand } from "./wordle/command.js";
+export {
+    createDefaultWordleCommand,
+    createWordleCommand,
+    runWordle,
+    runWordleRecords,
+    runWordleScoreboard,
+    wordleCommand,
+} from "./wordle/command.js";
 export type { RunWordleOptions, WordlePuzzleProvider } from "./wordle/command.js";
 
 export {

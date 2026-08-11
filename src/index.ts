@@ -7,7 +7,7 @@ const wordleSessionStore = new WordleSessionStore({
     databasePath: env.wordleDatabasePath,
 });
 const wordlePuzzleCache = new WordlePuzzleCache();
-const client = createClient(wordleSessionStore, wordlePuzzleCache);
+const client = createClient(wordleSessionStore, wordlePuzzleCache, env.enableTestCommands);
 wordlePuzzleCache.addRefreshListener(async (puzzle) => {
     wordleSessionStore.activatePuzzle(puzzle);
     await publishPendingYesterdayWordleRecords(client, puzzle.printDate, wordleSessionStore);
