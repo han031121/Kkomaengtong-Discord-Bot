@@ -22,6 +22,12 @@ export async function processWordleGuess(
     dictionary: WordleDictionary,
 ): Promise<void> {
     const guildId = getWordleGuildId(interaction);
+    const channelId = interaction.channelId;
+
+    if (channelId === null) {
+        throw new Error("Wordle 참여 채널을 찾을 수 없습니다.");
+    }
+
     const currentSession = store.get(interaction.user.id, printDate, guildId);
 
     if (currentSession === undefined) {
@@ -56,7 +62,13 @@ export async function processWordleGuess(
         ...currentSession,
         game: updatedGame,
     };
-    store.recordValidGuess(interaction.user.id, printDate, guildId, sessionWithUpdatedGame);
+    store.recordValidGuess(
+        interaction.user.id,
+        printDate,
+        guildId,
+        channelId,
+        sessionWithUpdatedGame,
+    );
     const panelMessage = await refreshSharedWordlePanels(interaction, updatedGame, store);
 
     const updatedSession: WordleSession = {

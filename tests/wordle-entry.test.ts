@@ -208,7 +208,7 @@ describe("Wordle 서버 간 진행 상태", () => {
             userId,
         );
         seedSession(store, {}, userId, otherGuildId);
-        store.registerGuildParticipant(userId, puzzle.printDate, guildId);
+        store.registerGuildParticipant(userId, puzzle.printDate, guildId, statusChannelId);
         store.setPublicStatusPanel({
             channelId: statusChannelId,
             guildId,

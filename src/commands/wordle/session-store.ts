@@ -10,10 +10,14 @@ import type {
     WordleDataStoreOptions,
     WordlePublicStatusPanel,
     WordleRecentPlayers,
+    WordleYesterdayAnnouncementTarget,
 } from "../../features/wordle/data-store.js";
 import type { WordleGame, WordlePuzzle } from "../../features/wordle/game.js";
 
-export type { WordlePublicStatusPanel } from "../../features/wordle/data-store.js";
+export type {
+    WordlePublicStatusPanel,
+    WordleYesterdayAnnouncementTarget,
+} from "../../features/wordle/data-store.js";
 
 export interface WordleSession {
     game: WordleGame;
@@ -80,25 +84,49 @@ export class WordleSessionStore {
         this.storeServerState(userId, printDate, guildId, session);
     }
 
-    public registerGuildParticipant(userId: string, printDate: string, guildId: string): number {
-        return this.dataStore.registerGuildParticipant(userId, printDate, guildId);
+    public registerGuildParticipant(
+        userId: string,
+        printDate: string,
+        guildId: string,
+        channelId: string,
+    ): number {
+        return this.dataStore.registerGuildParticipant(userId, printDate, guildId, channelId);
     }
 
     public recordValidGuess(
         userId: string,
         printDate: string,
         guildId: string,
+        channelId: string,
         session: WordleSession,
     ): number {
         const activityOrder = this.dataStore.recordValidGuess(
             userId,
             printDate,
             guildId,
+            channelId,
             session.game,
         );
 
         this.storeServerState(userId, printDate, guildId, session);
         return activityOrder;
+    }
+
+    public listPendingYesterdayAnnouncements(
+        currentPrintDate: string,
+    ): readonly WordleYesterdayAnnouncementTarget[] {
+        return this.dataStore.listPendingYesterdayAnnouncements(currentPrintDate);
+    }
+
+    public rearmYesterdayAnnouncements(currentPrintDate: string): number {
+        return this.dataStore.rearmYesterdayAnnouncements(currentPrintDate);
+    }
+
+    public markYesterdayAnnouncementSent(
+        target: WordleYesterdayAnnouncementTarget,
+        messageId: string,
+    ): void {
+        this.dataStore.markYesterdayAnnouncementSent(target, messageId);
     }
 
     public listServerGuildIds(userId: string, printDate: string): readonly string[] {

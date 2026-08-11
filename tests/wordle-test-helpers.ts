@@ -90,6 +90,7 @@ export function createCommandInteraction(options: CommandInteractionOptions = {}
     const fetchMessage = options.fetchMessage ?? vi.fn();
     const fetchChannel = options.fetchChannel ?? vi.fn();
     const editReply = vi.fn().mockResolvedValue({ id: "private-message" });
+    const reply = vi.fn().mockResolvedValue({ id: "reply-message" });
     const deferReply = vi.fn().mockImplementation(() => {
         deferred = true;
         return Promise.resolve();
@@ -114,6 +115,7 @@ export function createCommandInteraction(options: CommandInteractionOptions = {}
         options: {
             getString: () => options.guess ?? null,
         },
+        reply,
         user: {
             id: options.userId ?? WORDLE_TEST_IDS.user,
             displayAvatarURL: () => "https://cdn.example.com/avatar.png",
@@ -126,6 +128,7 @@ export function createCommandInteraction(options: CommandInteractionOptions = {}
         fetchChannel,
         fetchMessage,
         interaction,
+        reply,
         send,
     };
 }

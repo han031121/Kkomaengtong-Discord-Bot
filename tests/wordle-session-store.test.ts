@@ -184,7 +184,7 @@ describe("Wordle SQLite 세션 저장소", () => {
             }
 
             store.set(userId, datedPuzzle.printDate, game);
-            store.registerGuildParticipant(userId, datedPuzzle.printDate, guildId);
+            store.registerGuildParticipant(userId, datedPuzzle.printDate, guildId, channelId);
             store.setPublicStatusPanel({
                 guildId,
                 channelId,
@@ -220,6 +220,44 @@ describe("Wordle SQLite 세션 저장소", () => {
         expect(store.getPuzzle(previousPuzzle.printDate)).toEqual(previousPuzzle);
     });
 
+    it("전날 참여 서버의 최근 채널을 알림 대상으로 저장하고 전송 완료 후 제외합니다", () => {
+        const store = new WordleDataStore();
+        stores.push(store);
+        const previousPuzzle = {
+            ...puzzle,
+            id: 2_905,
+            printDate: "2026-07-23",
+            puzzleNumber: 1_860,
+        };
+        const firstChannelId = "32345678901234567";
+        const latestChannelId = "42345678901234567";
+
+        store.set(userId, previousPuzzle.printDate, createWordleGame(previousPuzzle));
+        store.registerGuildParticipant(userId, previousPuzzle.printDate, guildId, firstChannelId);
+        store.registerGuildParticipant(userId, previousPuzzle.printDate, guildId, latestChannelId);
+        store.activatePuzzle(puzzle);
+
+        expect(store.listPendingYesterdayAnnouncements(puzzle.printDate)).toEqual([
+            {
+                guildId,
+                channelId: latestChannelId,
+                recordDate: previousPuzzle.printDate,
+            },
+        ]);
+
+        const target = store.listPendingYesterdayAnnouncements(puzzle.printDate)[0];
+
+        if (target === undefined) {
+            throw new Error("전송 완료 처리할 어제 Wordle 알림 대상이 없습니다.");
+        }
+
+        store.markYesterdayAnnouncementSent(target, "52345678901234567");
+
+        expect(store.listPendingYesterdayAnnouncements(puzzle.printDate)).toEqual([]);
+        expect(store.rearmYesterdayAnnouncements(puzzle.printDate)).toBe(1);
+        expect(store.listPendingYesterdayAnnouncements(puzzle.printDate)).toEqual([target]);
+    });
+
     it("최근 활동 순번으로 사용자 8명을 정확하게 정렬합니다", () => {
         const store = new WordleDataStore();
         stores.push(store);
@@ -227,7 +265,13 @@ describe("Wordle SQLite 세션 저장소", () => {
 
         for (const recentUserId of userIds) {
             const game = submitGuess(createWordleGame(puzzle), "crane");
-            store.recordValidGuess(recentUserId, puzzle.printDate, guildId, game);
+            store.recordValidGuess(
+                recentUserId,
+                puzzle.printDate,
+                guildId,
+                WORDLE_TEST_IDS.channel,
+                game,
+            );
         }
 
         const firstRanking = store.getRecentPlayers(guildId, puzzle.printDate, 8);
@@ -247,7 +291,13 @@ describe("Wordle SQLite 세션 저장소", () => {
             store.get(firstUserId, puzzle.printDate) ?? createWordleGame(puzzle),
             "slate",
         );
-        store.recordValidGuess(firstUserId, puzzle.printDate, guildId, updatedGame);
+        store.recordValidGuess(
+            firstUserId,
+            puzzle.printDate,
+            guildId,
+            WORDLE_TEST_IDS.channel,
+            updatedGame,
+        );
 
         expect(store.getRecentPlayers(guildId, puzzle.printDate, 8).players[0]?.userId).toBe(
             firstUserId,
@@ -260,8 +310,18 @@ describe("Wordle SQLite 세션 저장소", () => {
         const game = createWordleGame(puzzle);
 
         firstStore.set(userId, puzzle.printDate, game);
-        firstStore.registerGuildParticipant(userId, puzzle.printDate, guildId);
-        firstStore.registerGuildParticipant(userId, puzzle.printDate, guildId);
+        firstStore.registerGuildParticipant(
+            userId,
+            puzzle.printDate,
+            guildId,
+            WORDLE_TEST_IDS.channel,
+        );
+        firstStore.registerGuildParticipant(
+            userId,
+            puzzle.printDate,
+            guildId,
+            WORDLE_TEST_IDS.channel,
+        );
         firstStore.close();
 
         const restartedStore = openStore(databasePath);
@@ -285,7 +345,7 @@ describe("Wordle SQLite 세션 저장소", () => {
         const channelId = "32345678901234567";
         const messageId = "42345678901234567";
 
-        firstStore.recordValidGuess(userId, puzzle.printDate, guildId, game);
+        firstStore.recordValidGuess(userId, puzzle.printDate, guildId, channelId, game);
         firstStore.setPublicStatusPanel({
             guildId,
             channelId,
@@ -452,6 +512,23 @@ describe("Wordle SQLite 세션 저장소", () => {
             messageId: "42345678901234567",
             printDate: puzzle.printDate,
         });
+        const nextPuzzle = {
+            ...puzzle,
+            id: puzzle.id + 1,
+            printDate: "2026-07-25",
+            puzzleNumber: puzzle.puzzleNumber + 1,
+            solution: "slate",
+        };
+
+        migratedStore.activatePuzzle(nextPuzzle);
+
+        expect(migratedStore.listPendingYesterdayAnnouncements(nextPuzzle.printDate)).toEqual([
+            {
+                guildId,
+                channelId: "32345678901234567",
+                recordDate: puzzle.printDate,
+            },
+        ]);
 
         const migratedDatabase = new DatabaseSync(databasePath, { readOnly: true });
         const legacyActivityTable = migratedDatabase
@@ -464,9 +541,13 @@ describe("Wordle SQLite 세션 저장소", () => {
             )
             .get();
         const foreignKeyViolations = migratedDatabase.prepare("PRAGMA foreign_key_check").all();
+        const userVersion = migratedDatabase.prepare("PRAGMA user_version").get() as {
+            user_version: number;
+        };
         migratedDatabase.close();
 
         expect(legacyActivityTable).toBeUndefined();
         expect(foreignKeyViolations).toEqual([]);
+        expect(userVersion.user_version).toBe(2);
     });
 });

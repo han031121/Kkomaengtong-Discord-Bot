@@ -64,4 +64,20 @@ describe("슬래시 명령어 정의", () => {
         });
         expect(commandData.dm_permission).toBe(false);
     });
+
+    it("어제 Wordle 테스트 명령어는 서버 전용으로 등록됩니다", () => {
+        const commandData = getCommand("어제워들_test");
+
+        expect(commandData.description).toBe("어제의 Wordle 기록판을 테스트합니다.");
+        expect(commandData.options).toEqual([]);
+        expect(commandData.dm_permission).toBe(false);
+    });
+
+    it("Wordle 갱신 테스트 명령어는 서버 전용으로 등록됩니다", () => {
+        const commandData = getCommand("워들갱신_test");
+
+        expect(commandData.description).toBe("오늘의 Wordle 정답 캐시를 강제로 갱신합니다.");
+        expect(commandData.options).toEqual([]);
+        expect(commandData.dm_permission).toBe(false);
+    });
 });

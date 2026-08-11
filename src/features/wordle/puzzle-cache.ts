@@ -1,4 +1,5 @@
 import type { WordlePuzzle } from "./game.js";
+import { getPreviousWordlePrintDate } from "./data-store.js";
 import { formatDateInTimeZone, NytWordleClient } from "./nyt-wordle-client.js";
 
 const DEFAULT_WORDLE_TIME_ZONE = "Asia/Seoul";
@@ -71,20 +72,52 @@ export class WordlePuzzleCache {
     ) {}
 
     public async refresh(now = new Date()): Promise<WordlePuzzle> {
+        const puzzle = await this.requestPuzzle(now);
+
+        return this.applyRefreshedPuzzle(puzzle);
+    }
+
+    public async refreshForDateChangeTest(
+        previousPuzzle: WordlePuzzle,
+        prepareDateChange: () => void,
+        now = new Date(),
+    ): Promise<WordlePuzzle> {
         const printDate = formatDateInTimeZone(now, this.timeZone);
-        const puzzle = await this.client.getPuzzle(printDate, { forceRefresh: true });
+        const expectedPreviousPrintDate = getPreviousWordlePrintDate(printDate);
+
+        if (previousPuzzle.printDate !== expectedPreviousPrintDate) {
+            throw new RangeError(
+                `날짜 전환 테스트 퍼즐은 ${expectedPreviousPrintDate} 기록이어야 합니다: ${previousPuzzle.printDate}`,
+            );
+        }
+
+        const puzzle = await this.requestPuzzle(now);
+
+        prepareDateChange();
+        this.cachedPuzzle = previousPuzzle;
+        return this.applyRefreshedPuzzle(puzzle);
+    }
+
+    private requestPuzzle(now: Date): Promise<WordlePuzzle> {
+        const printDate = formatDateInTimeZone(now, this.timeZone);
+        return this.client.getPuzzle(printDate, { forceRefresh: true });
+    }
+
+    private async applyRefreshedPuzzle(puzzle: WordlePuzzle): Promise<WordlePuzzle> {
+        const newerCachedPuzzle =
+            this.cachedPuzzle !== undefined && this.cachedPuzzle.printDate > puzzle.printDate
+                ? this.cachedPuzzle
+                : undefined;
+
+        if (newerCachedPuzzle === undefined) {
+            this.cachedPuzzle = puzzle;
+        }
 
         for (const listener of this.refreshListeners) {
             await listener(puzzle);
         }
 
-        if (this.cachedPuzzle !== undefined && this.cachedPuzzle.printDate > puzzle.printDate) {
-            return this.cachedPuzzle;
-        }
-
-        this.cachedPuzzle = puzzle;
-
-        return puzzle;
+        return newerCachedPuzzle ?? puzzle;
     }
 
     public addRefreshListener(listener: WordlePuzzleRefreshListener): () => void {

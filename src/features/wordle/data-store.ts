@@ -26,6 +26,12 @@ export interface WordlePublicStatusPanel {
     printDate: string;
 }
 
+export interface WordleYesterdayAnnouncementTarget {
+    guildId: string;
+    channelId: string;
+    recordDate: string;
+}
+
 interface PersistedWordleGame {
     puzzle_id: number;
     solution: string;
@@ -73,7 +79,13 @@ interface PersistedPrintDate {
     print_date: string | null;
 }
 
-const WORDLE_SCHEMA_VERSION = 1;
+interface PersistedYesterdayAnnouncementTarget {
+    guild_id: string;
+    channel_id: string;
+    record_date: string;
+}
+
+const WORDLE_SCHEMA_VERSION = 2;
 
 export function getPreviousWordlePrintDate(printDate: string): string {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(printDate)) {
@@ -233,24 +245,103 @@ export class WordleDataStore {
         this.runTransaction(() => this.saveGame(userId, printDate, game));
     }
 
-    public registerGuildParticipant(userId: string, printDate: string, guildId: string): number {
-        return this.runTransaction(() =>
-            this.saveGuildParticipantActivity(userId, printDate, guildId),
-        );
+    public registerGuildParticipant(
+        userId: string,
+        printDate: string,
+        guildId: string,
+        channelId: string,
+    ): number {
+        return this.runTransaction(() => {
+            const activityOrder = this.saveGuildParticipantActivity(userId, printDate, guildId);
+            this.saveGuildDailyChannel(guildId, printDate, channelId);
+            return activityOrder;
+        });
     }
 
     public recordValidGuess(
         userId: string,
         printDate: string,
         guildId: string,
+        channelId: string,
         game: WordleGame,
     ): number {
         const activityOrder = this.runTransaction(() => {
             this.saveGame(userId, printDate, game);
-            return this.saveGuildParticipantActivity(userId, printDate, guildId);
+            const nextActivityOrder = this.saveGuildParticipantActivity(userId, printDate, guildId);
+            this.saveGuildDailyChannel(guildId, printDate, channelId);
+            return nextActivityOrder;
         });
 
         return activityOrder;
+    }
+
+    public listPendingYesterdayAnnouncements(
+        currentPrintDate: string,
+    ): readonly WordleYesterdayAnnouncementTarget[] {
+        const recordDate = getPreviousWordlePrintDate(currentPrintDate);
+        const rows = this.database
+            .prepare(
+                `
+                    SELECT
+                        daily_channel.guild_id,
+                        daily_channel.channel_id,
+                        daily_channel.print_date AS record_date
+                    FROM wordle_guild_daily_channels AS daily_channel
+                    LEFT JOIN wordle_yesterday_announcements AS announcement
+                        ON announcement.guild_id = daily_channel.guild_id
+                        AND announcement.record_date = daily_channel.print_date
+                    WHERE daily_channel.print_date = ?
+                        AND announcement.guild_id IS NULL
+                        AND EXISTS (
+                            SELECT 1
+                            FROM wordle_guild_participants AS participant
+                            WHERE participant.guild_id = daily_channel.guild_id
+                                AND participant.print_date = daily_channel.print_date
+                        )
+                    ORDER BY daily_channel.guild_id
+                `,
+            )
+            .all(recordDate) as unknown as PersistedYesterdayAnnouncementTarget[];
+
+        return rows.map((row) => this.parseYesterdayAnnouncementTarget(row));
+    }
+
+    public rearmYesterdayAnnouncements(currentPrintDate: string): number {
+        const recordDate = getPreviousWordlePrintDate(currentPrintDate);
+        const result = this.database
+            .prepare(
+                `
+                    DELETE FROM wordle_yesterday_announcements
+                    WHERE record_date = ?
+                `,
+            )
+            .run(recordDate);
+
+        return Number(result.changes);
+    }
+
+    public markYesterdayAnnouncementSent(
+        target: WordleYesterdayAnnouncementTarget,
+        messageId: string,
+    ): void {
+        this.database
+            .prepare(
+                `
+                    INSERT INTO wordle_yesterday_announcements (
+                        guild_id,
+                        record_date,
+                        channel_id,
+                        message_id,
+                        sent_at
+                    )
+                    VALUES (?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+                    ON CONFLICT (guild_id, record_date) DO UPDATE SET
+                        channel_id = excluded.channel_id,
+                        message_id = excluded.message_id,
+                        sent_at = excluded.sent_at
+                `,
+            )
+            .run(target.guildId, target.recordDate, target.channelId, messageId);
     }
 
     public listParticipantGuildIds(userId: string, printDate: string): readonly string[] {
@@ -416,6 +507,7 @@ export class WordleDataStore {
     private migrateSchema(): void {
         if (!this.tableExists("wordle_games")) {
             this.createCurrentSchema();
+            this.backfillGuildDailyChannels();
             return;
         }
 
@@ -426,10 +518,12 @@ export class WordleDataStore {
 
         if (!isLegacySchema) {
             this.createCurrentSchema();
+            this.backfillGuildDailyChannels();
             return;
         }
 
         this.migrateLegacySchema();
+        this.backfillGuildDailyChannels();
     }
 
     private createCurrentSchema(): void {
@@ -476,6 +570,17 @@ export class WordleDataStore {
                 last_activity_order DESC
             );
 
+            CREATE TABLE IF NOT EXISTS wordle_guild_daily_channels (
+                guild_id TEXT NOT NULL,
+                print_date TEXT NOT NULL,
+                channel_id TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (guild_id, print_date),
+                FOREIGN KEY (print_date)
+                    REFERENCES wordle_puzzles (print_date)
+                    ON DELETE CASCADE
+            );
+
             CREATE TABLE IF NOT EXISTS wordle_public_status_panels (
                 guild_id TEXT NOT NULL,
                 channel_id TEXT NOT NULL,
@@ -487,7 +592,44 @@ export class WordleDataStore {
                     ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS wordle_yesterday_announcements (
+                guild_id TEXT NOT NULL,
+                record_date TEXT NOT NULL,
+                channel_id TEXT NOT NULL,
+                message_id TEXT NOT NULL,
+                sent_at TEXT NOT NULL,
+                PRIMARY KEY (guild_id, record_date),
+                FOREIGN KEY (record_date)
+                    REFERENCES wordle_puzzles (print_date)
+                    ON DELETE CASCADE
+            );
+
             PRAGMA user_version = ${WORDLE_SCHEMA_VERSION};
+        `);
+    }
+
+    private backfillGuildDailyChannels(): void {
+        this.database.exec(`
+            INSERT INTO wordle_guild_daily_channels (
+                guild_id,
+                print_date,
+                channel_id,
+                updated_at
+            )
+            SELECT
+                panel.guild_id,
+                panel.print_date,
+                MIN(panel.channel_id),
+                strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+            FROM wordle_public_status_panels AS panel
+            WHERE EXISTS (
+                SELECT 1
+                FROM wordle_guild_participants AS participant
+                WHERE participant.guild_id = panel.guild_id
+                    AND participant.print_date = panel.print_date
+            )
+            GROUP BY panel.guild_id, panel.print_date
+            ON CONFLICT (guild_id, print_date) DO NOTHING;
         `);
     }
 
@@ -834,6 +976,29 @@ export class WordleDataStore {
         return activityOrder;
     }
 
+    private saveGuildDailyChannel(guildId: string, printDate: string, channelId: string): void {
+        if (!/^\d{17,20}$/.test(guildId) || !/^\d{17,20}$/.test(channelId)) {
+            throw new RangeError("저장할 Wordle 서버 또는 채널 ID 형식이 올바르지 않습니다.");
+        }
+
+        this.database
+            .prepare(
+                `
+                    INSERT INTO wordle_guild_daily_channels (
+                        guild_id,
+                        print_date,
+                        channel_id,
+                        updated_at
+                    )
+                    VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+                    ON CONFLICT (guild_id, print_date) DO UPDATE SET
+                        channel_id = excluded.channel_id,
+                        updated_at = excluded.updated_at
+                `,
+            )
+            .run(guildId, printDate, channelId);
+    }
+
     private runTransaction<T>(operation: () => T): T {
         this.database.exec("BEGIN IMMEDIATE");
 
@@ -862,6 +1027,24 @@ export class WordleDataStore {
             channelId: row.channel_id,
             messageId: row.message_id,
             printDate: row.print_date,
+        };
+    }
+
+    private parseYesterdayAnnouncementTarget(
+        row: PersistedYesterdayAnnouncementTarget,
+    ): WordleYesterdayAnnouncementTarget {
+        if (
+            !/^\d{17,20}$/.test(row.guild_id) ||
+            !/^\d{17,20}$/.test(row.channel_id) ||
+            !/^\d{4}-\d{2}-\d{2}$/.test(row.record_date)
+        ) {
+            throw new Error("SQLite에 저장된 어제 Wordle 기록판 대상 정보가 올바르지 않습니다.");
+        }
+
+        return {
+            guildId: row.guild_id,
+            channelId: row.channel_id,
+            recordDate: row.record_date,
         };
     }
 }

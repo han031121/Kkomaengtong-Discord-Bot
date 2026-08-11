@@ -70,6 +70,12 @@ export async function runWordle(
         const game = createWordleGame(puzzle);
         await wordleUserLock.runExclusive(interaction.user.id, async () => {
             const guildId = getWordleGuildId(interaction);
+            const channelId = interaction.channelId;
+
+            if (channelId === null) {
+                throw new Error("Wordle 참여 채널을 찾을 수 없습니다.");
+            }
+
             const existingSession = store.get(interaction.user.id, puzzle.printDate, guildId);
             let session: WordleSession = existingSession ?? {
                 game,
@@ -94,7 +100,12 @@ export async function runWordle(
             }
 
             store.set(interaction.user.id, puzzle.printDate, guildId, session);
-            store.registerGuildParticipant(interaction.user.id, puzzle.printDate, guildId);
+            store.registerGuildParticipant(
+                interaction.user.id,
+                puzzle.printDate,
+                guildId,
+                channelId,
+            );
             await refreshWordlePublicStatusPanels(interaction, puzzle.printDate, store);
 
             if (rawGuess === undefined) {
