@@ -98,6 +98,7 @@ describe("Wordle 실행 진입점", () => {
         const store = new WordleSessionStore();
         const context = createCommandInteraction({ channelId, fetchMessage, userId });
 
+        store.activatePuzzle(puzzle);
         store.setPublicStatusPanel({
             channelId,
             guildId,

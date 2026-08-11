@@ -7,6 +7,9 @@ const wordleSessionStore = new WordleSessionStore({
     databasePath: env.wordleDatabasePath,
 });
 const wordlePuzzleCache = new WordlePuzzleCache();
+wordlePuzzleCache.addRefreshListener((puzzle) => {
+    wordleSessionStore.activatePuzzle(puzzle);
+});
 const client = createClient(wordleSessionStore, wordlePuzzleCache);
 
 async function shutdown(signal: string): Promise<void> {

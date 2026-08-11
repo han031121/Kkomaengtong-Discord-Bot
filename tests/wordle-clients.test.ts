@@ -105,6 +105,20 @@ describe("Wordle 퍼즐 캐시", () => {
         expect(getPuzzle).toHaveBeenCalledWith("2026-07-23", { forceRefresh: true });
     });
 
+    it("퍼즐 갱신 성공을 등록된 저장 리스너에 전달합니다", async () => {
+        const getPuzzle = vi.fn().mockResolvedValue(cachedPuzzle);
+        const refreshListener = vi.fn();
+        const cache = new WordlePuzzleCache({ getPuzzle });
+        const removeListener = cache.addRefreshListener(refreshListener);
+
+        await cache.refresh(new Date("2026-07-22T15:30:00.000Z"));
+        removeListener();
+        await cache.refresh(new Date("2026-07-22T15:30:00.000Z"));
+
+        expect(refreshListener).toHaveBeenCalledOnce();
+        expect(refreshListener).toHaveBeenCalledWith(cachedPuzzle);
+    });
+
     it("캐시된 퍼즐 날짜가 오늘과 다르면 준비되지 않은 상태로 처리합니다", async () => {
         const getPuzzle = vi.fn().mockResolvedValue(cachedPuzzle);
         const cache = new WordlePuzzleCache({ getPuzzle });

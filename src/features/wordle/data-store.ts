@@ -2,7 +2,7 @@ import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
-import type { EvaluatedGuess, GameStatus, TileState, WordleGame } from "./game.js";
+import type { EvaluatedGuess, GameStatus, TileState, WordleGame, WordlePuzzle } from "./game.js";
 
 export interface WordleDataStoreOptions {
     databasePath?: string;
@@ -34,6 +34,13 @@ interface PersistedWordleGame {
     status: string;
 }
 
+interface PersistedWordlePuzzle {
+    print_date: string;
+    puzzle_id: number;
+    solution: string;
+    puzzle_number: number;
+}
+
 interface PersistedRecentPlayer extends PersistedWordleGame {
     user_id: string;
     last_activity_order: number;
@@ -52,6 +59,49 @@ interface PersistedPublicStatusPanel {
     channel_id: string;
     message_id: string;
     print_date: string;
+}
+
+interface PersistedTableName {
+    name: string;
+}
+
+interface PersistedTableColumn {
+    name: string;
+}
+
+interface PersistedPrintDate {
+    print_date: string | null;
+}
+
+const WORDLE_SCHEMA_VERSION = 1;
+
+export function getPreviousWordlePrintDate(printDate: string): string {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(printDate)) {
+        throw new RangeError(`Wordle 날짜 형식이 올바르지 않습니다: ${printDate}`);
+    }
+
+    const date = new Date(`${printDate}T00:00:00.000Z`);
+
+    if (Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== printDate) {
+        throw new RangeError(`실제로 존재하지 않는 Wordle 날짜입니다: ${printDate}`);
+    }
+
+    date.setUTCDate(date.getUTCDate() - 1);
+    return date.toISOString().slice(0, 10);
+}
+
+function validatePuzzle(puzzle: WordlePuzzle): void {
+    getPreviousWordlePrintDate(puzzle.printDate);
+
+    if (
+        !Number.isSafeInteger(puzzle.id) ||
+        puzzle.id < 0 ||
+        !Number.isSafeInteger(puzzle.puzzleNumber) ||
+        puzzle.puzzleNumber < 1 ||
+        !/^[a-z]{5}$/.test(puzzle.solution)
+    ) {
+        throw new RangeError("저장할 Wordle 퍼즐 정보 형식이 올바르지 않습니다.");
+    }
 }
 
 function isTileState(value: unknown): value is TileState {
@@ -126,70 +176,53 @@ export class WordleDataStore {
         this.database.exec(`
             PRAGMA journal_mode = WAL;
             PRAGMA busy_timeout = 5000;
-
-            CREATE TABLE IF NOT EXISTS wordle_games (
-                user_id TEXT NOT NULL,
-                print_date TEXT NOT NULL,
-                puzzle_id INTEGER NOT NULL,
-                solution TEXT NOT NULL,
-                puzzle_number INTEGER NOT NULL,
-                guesses_json TEXT NOT NULL,
-                status TEXT NOT NULL CHECK (status IN ('playing', 'won', 'lost')),
-                updated_at TEXT NOT NULL,
-                PRIMARY KEY (user_id, print_date)
-            );
-
-            CREATE TABLE IF NOT EXISTS wordle_input_activity (
-                order_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                guild_id TEXT NOT NULL,
-                print_date TEXT NOT NULL,
-                user_id TEXT NOT NULL
-            );
-
-            CREATE INDEX IF NOT EXISTS wordle_input_activity_recent
-            ON wordle_input_activity (guild_id, print_date, order_id DESC);
-
-            CREATE TABLE IF NOT EXISTS wordle_guild_participants (
-                guild_id TEXT NOT NULL,
-                print_date TEXT NOT NULL,
-                user_id TEXT NOT NULL,
-                last_activity_order INTEGER NOT NULL,
-                updated_at TEXT NOT NULL,
-                PRIMARY KEY (guild_id, print_date, user_id)
-            );
-
-            CREATE INDEX IF NOT EXISTS wordle_guild_participants_recent
-            ON wordle_guild_participants (
-                guild_id,
-                print_date,
-                last_activity_order DESC
-            );
-
-            INSERT INTO wordle_guild_participants (
-                guild_id,
-                print_date,
-                user_id,
-                last_activity_order,
-                updated_at
-            )
-            SELECT
-                guild_id,
-                print_date,
-                user_id,
-                MAX(order_id),
-                strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-            FROM wordle_input_activity
-            GROUP BY guild_id, print_date, user_id
-            ON CONFLICT (guild_id, print_date, user_id) DO NOTHING;
-
-            CREATE TABLE IF NOT EXISTS wordle_public_status_panels (
-                guild_id TEXT NOT NULL,
-                channel_id TEXT NOT NULL,
-                message_id TEXT NOT NULL,
-                print_date TEXT NOT NULL,
-                PRIMARY KEY (guild_id, channel_id)
-            );
         `);
+        this.migrateSchema();
+        this.database.exec("PRAGMA foreign_keys = ON;");
+    }
+
+    public activatePuzzle(puzzle: WordlePuzzle): string {
+        validatePuzzle(puzzle);
+
+        return this.runTransaction(() => {
+            const latestRow = this.database
+                .prepare("SELECT MAX(print_date) AS print_date FROM wordle_puzzles")
+                .get() as unknown as PersistedPrintDate;
+
+            if (latestRow.print_date !== null && latestRow.print_date > puzzle.printDate) {
+                if (getPreviousWordlePrintDate(latestRow.print_date) === puzzle.printDate) {
+                    this.savePuzzle(puzzle);
+                }
+
+                return latestRow.print_date;
+            }
+
+            this.savePuzzle(puzzle);
+            this.database
+                .prepare(
+                    `
+                        DELETE FROM wordle_puzzles
+                        WHERE print_date NOT IN (?, ?)
+                    `,
+                )
+                .run(puzzle.printDate, getPreviousWordlePrintDate(puzzle.printDate));
+
+            return puzzle.printDate;
+        });
+    }
+
+    public getPuzzle(printDate: string): WordlePuzzle | undefined {
+        const row = this.database
+            .prepare(
+                `
+                    SELECT print_date, puzzle_id, solution, puzzle_number
+                    FROM wordle_puzzles
+                    WHERE print_date = ?
+                `,
+            )
+            .get(printDate) as PersistedWordlePuzzle | undefined;
+
+        return row === undefined ? undefined : this.parsePuzzle(row);
     }
 
     public get(userId: string, printDate: string): WordleGame | undefined {
@@ -197,7 +230,7 @@ export class WordleDataStore {
     }
 
     public set(userId: string, printDate: string, game: WordleGame): void {
-        this.saveGame(userId, printDate, game);
+        this.runTransaction(() => this.saveGame(userId, printDate, game));
     }
 
     public registerGuildParticipant(userId: string, printDate: string, guildId: string): number {
@@ -250,15 +283,17 @@ export class WordleDataStore {
                     SELECT
                         participant.user_id,
                         participant.last_activity_order,
-                        game.puzzle_id,
-                        game.solution,
-                        game.puzzle_number,
+                        puzzle.puzzle_id,
+                        puzzle.solution,
+                        puzzle.puzzle_number,
                         game.guesses_json,
                         game.status
                     FROM wordle_guild_participants AS participant
                     INNER JOIN wordle_games AS game
                         ON game.user_id = participant.user_id
                         AND game.print_date = participant.print_date
+                    INNER JOIN wordle_puzzles AS puzzle
+                        ON puzzle.print_date = game.print_date
                     WHERE participant.guild_id = ? AND participant.print_date = ?
                     ORDER BY participant.last_activity_order DESC
                     LIMIT ?
@@ -378,13 +413,282 @@ export class WordleDataStore {
         this.databaseClosed = true;
     }
 
+    private migrateSchema(): void {
+        if (!this.tableExists("wordle_games")) {
+            this.createCurrentSchema();
+            return;
+        }
+
+        const gameColumns = this.database
+            .prepare("PRAGMA table_info(wordle_games)")
+            .all() as unknown as PersistedTableColumn[];
+        const isLegacySchema = gameColumns.some((column) => column.name === "solution");
+
+        if (!isLegacySchema) {
+            this.createCurrentSchema();
+            return;
+        }
+
+        this.migrateLegacySchema();
+    }
+
+    private createCurrentSchema(): void {
+        this.database.exec(`
+            CREATE TABLE IF NOT EXISTS wordle_puzzles (
+                print_date TEXT PRIMARY KEY CHECK (date(print_date) = print_date),
+                puzzle_id INTEGER NOT NULL CHECK (puzzle_id >= 0),
+                solution TEXT NOT NULL CHECK (
+                    length(solution) = 5
+                    AND solution GLOB '[a-z][a-z][a-z][a-z][a-z]'
+                ),
+                puzzle_number INTEGER NOT NULL CHECK (puzzle_number >= 1),
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS wordle_games (
+                user_id TEXT NOT NULL,
+                print_date TEXT NOT NULL,
+                guesses_json TEXT NOT NULL,
+                status TEXT NOT NULL CHECK (status IN ('playing', 'won', 'lost')),
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (user_id, print_date),
+                FOREIGN KEY (print_date)
+                    REFERENCES wordle_puzzles (print_date)
+                    ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS wordle_guild_participants (
+                guild_id TEXT NOT NULL,
+                print_date TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                last_activity_order INTEGER NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (guild_id, print_date, user_id),
+                FOREIGN KEY (user_id, print_date)
+                    REFERENCES wordle_games (user_id, print_date)
+                    ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS wordle_guild_participants_recent
+            ON wordle_guild_participants (
+                guild_id,
+                print_date,
+                last_activity_order DESC
+            );
+
+            CREATE TABLE IF NOT EXISTS wordle_public_status_panels (
+                guild_id TEXT NOT NULL,
+                channel_id TEXT NOT NULL,
+                message_id TEXT NOT NULL,
+                print_date TEXT NOT NULL,
+                PRIMARY KEY (guild_id, channel_id),
+                FOREIGN KEY (print_date)
+                    REFERENCES wordle_puzzles (print_date)
+                    ON DELETE CASCADE
+            );
+
+            PRAGMA user_version = ${WORDLE_SCHEMA_VERSION};
+        `);
+    }
+
+    private migrateLegacySchema(): void {
+        const conflictingPuzzle = this.database
+            .prepare(
+                `
+                    SELECT print_date
+                    FROM wordle_games
+                    GROUP BY print_date
+                    HAVING COUNT(
+                        DISTINCT CAST(puzzle_id AS TEXT) || ':' || lower(solution) || ':' ||
+                            CAST(puzzle_number AS TEXT)
+                    ) > 1
+                    LIMIT 1
+                `,
+            )
+            .get() as { print_date: string } | undefined;
+
+        if (conflictingPuzzle !== undefined) {
+            throw new Error(
+                `같은 날짜에 서로 다른 Wordle 퍼즐이 저장되어 마이그레이션할 수 없습니다: ${conflictingPuzzle.print_date}`,
+            );
+        }
+
+        const hasParticipants = this.tableExists("wordle_guild_participants");
+        const hasInputActivity = this.tableExists("wordle_input_activity");
+        const hasPublicStatusPanels = this.tableExists("wordle_public_status_panels");
+
+        this.database.exec("PRAGMA foreign_keys = OFF;");
+        this.database.exec("BEGIN IMMEDIATE;");
+
+        try {
+            this.database.exec(`
+                CREATE TABLE wordle_puzzles (
+                    print_date TEXT PRIMARY KEY CHECK (date(print_date) = print_date),
+                    puzzle_id INTEGER NOT NULL CHECK (puzzle_id >= 0),
+                    solution TEXT NOT NULL CHECK (
+                        length(solution) = 5
+                        AND solution GLOB '[a-z][a-z][a-z][a-z][a-z]'
+                    ),
+                    puzzle_number INTEGER NOT NULL CHECK (puzzle_number >= 1),
+                    updated_at TEXT NOT NULL
+                );
+
+                INSERT INTO wordle_puzzles (
+                    print_date,
+                    puzzle_id,
+                    solution,
+                    puzzle_number,
+                    updated_at
+                )
+                SELECT
+                    print_date,
+                    MIN(puzzle_id),
+                    lower(MIN(solution)),
+                    MIN(puzzle_number),
+                    MAX(updated_at)
+                FROM wordle_games
+                GROUP BY print_date;
+
+                ALTER TABLE wordle_games RENAME TO wordle_games_legacy;
+            `);
+
+            if (hasParticipants) {
+                this.database.exec(
+                    "ALTER TABLE wordle_guild_participants RENAME TO wordle_guild_participants_legacy;",
+                );
+            }
+
+            if (hasPublicStatusPanels) {
+                this.database.exec(
+                    "ALTER TABLE wordle_public_status_panels RENAME TO wordle_public_status_panels_legacy;",
+                );
+            }
+
+            this.database.exec("DROP INDEX IF EXISTS wordle_guild_participants_recent;");
+            this.createCurrentSchema();
+            this.database.exec(`
+                INSERT INTO wordle_games (
+                    user_id,
+                    print_date,
+                    guesses_json,
+                    status,
+                    updated_at
+                )
+                SELECT user_id, print_date, guesses_json, status, updated_at
+                FROM wordle_games_legacy;
+            `);
+
+            if (hasParticipants) {
+                this.database.exec(`
+                    INSERT INTO wordle_guild_participants (
+                        guild_id,
+                        print_date,
+                        user_id,
+                        last_activity_order,
+                        updated_at
+                    )
+                    SELECT
+                        participant.guild_id,
+                        participant.print_date,
+                        participant.user_id,
+                        participant.last_activity_order,
+                        participant.updated_at
+                    FROM wordle_guild_participants_legacy AS participant
+                    INNER JOIN wordle_games AS game
+                        ON game.user_id = participant.user_id
+                        AND game.print_date = participant.print_date;
+                `);
+            }
+
+            if (hasInputActivity) {
+                this.database.exec(`
+                    INSERT INTO wordle_guild_participants (
+                        guild_id,
+                        print_date,
+                        user_id,
+                        last_activity_order,
+                        updated_at
+                    )
+                    SELECT
+                        activity.guild_id,
+                        activity.print_date,
+                        activity.user_id,
+                        MAX(activity.order_id),
+                        strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+                    FROM wordle_input_activity AS activity
+                    INNER JOIN wordle_games AS game
+                        ON game.user_id = activity.user_id
+                        AND game.print_date = activity.print_date
+                    GROUP BY activity.guild_id, activity.print_date, activity.user_id
+                    ON CONFLICT (guild_id, print_date, user_id) DO UPDATE SET
+                        last_activity_order = MAX(
+                            wordle_guild_participants.last_activity_order,
+                            excluded.last_activity_order
+                        ),
+                        updated_at = excluded.updated_at;
+                `);
+            }
+
+            if (hasPublicStatusPanels) {
+                this.database.exec(`
+                    INSERT INTO wordle_public_status_panels (
+                        guild_id,
+                        channel_id,
+                        message_id,
+                        print_date
+                    )
+                    SELECT
+                        panel.guild_id,
+                        panel.channel_id,
+                        panel.message_id,
+                        panel.print_date
+                    FROM wordle_public_status_panels_legacy AS panel
+                    INNER JOIN wordle_puzzles AS puzzle
+                        ON puzzle.print_date = panel.print_date;
+                `);
+            }
+
+            this.database.exec(`
+                DROP TABLE wordle_games_legacy;
+                DROP TABLE IF EXISTS wordle_guild_participants_legacy;
+                DROP TABLE IF EXISTS wordle_public_status_panels_legacy;
+                DROP TABLE IF EXISTS wordle_input_activity;
+                COMMIT;
+            `);
+        } catch (error) {
+            this.database.exec("ROLLBACK;");
+            throw error;
+        }
+    }
+
+    private tableExists(tableName: string): boolean {
+        const row = this.database
+            .prepare(
+                `
+                    SELECT name
+                    FROM sqlite_master
+                    WHERE type = 'table' AND name = ?
+                `,
+            )
+            .get(tableName) as PersistedTableName | undefined;
+
+        return row !== undefined;
+    }
+
     private loadGame(userId: string, printDate: string): WordleGame | undefined {
         const row = this.database
             .prepare(
                 `
-                    SELECT puzzle_id, solution, puzzle_number, guesses_json, status
-                    FROM wordle_games
-                    WHERE user_id = ? AND print_date = ?
+                    SELECT
+                        puzzle.puzzle_id,
+                        puzzle.solution,
+                        puzzle.puzzle_number,
+                        game.guesses_json,
+                        game.status
+                    FROM wordle_games AS game
+                    INNER JOIN wordle_puzzles AS puzzle
+                        ON puzzle.print_date = game.print_date
+                    WHERE game.user_id = ? AND game.print_date = ?
                 `,
             )
             .get(userId, printDate) as PersistedWordleGame | undefined;
@@ -417,39 +721,76 @@ export class WordleDataStore {
         };
     }
 
+    private parsePuzzle(row: PersistedWordlePuzzle): WordlePuzzle {
+        const puzzle = {
+            id: row.puzzle_id,
+            solution: row.solution,
+            printDate: row.print_date,
+            puzzleNumber: row.puzzle_number,
+        };
+
+        try {
+            validatePuzzle(puzzle);
+        } catch (error) {
+            throw new Error("SQLite에 저장된 Wordle 퍼즐 정보 형식이 올바르지 않습니다.", {
+                cause: error,
+            });
+        }
+
+        return puzzle;
+    }
+
     private saveGame(userId: string, printDate: string, game: WordleGame): void {
+        if (printDate !== game.puzzle.printDate) {
+            throw new RangeError("저장 키와 Wordle 퍼즐 날짜가 일치하지 않습니다.");
+        }
+
+        validatePuzzle(game.puzzle);
+        this.savePuzzle(game.puzzle);
         this.database
             .prepare(
                 `
                     INSERT INTO wordle_games (
                         user_id,
                         print_date,
-                        puzzle_id,
-                        solution,
-                        puzzle_number,
                         guesses_json,
                         status,
                         updated_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+                    VALUES (?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
                     ON CONFLICT (user_id, print_date) DO UPDATE SET
-                        puzzle_id = excluded.puzzle_id,
-                        solution = excluded.solution,
-                        puzzle_number = excluded.puzzle_number,
                         guesses_json = excluded.guesses_json,
                         status = excluded.status,
                         updated_at = excluded.updated_at
                 `,
             )
-            .run(
-                userId,
-                printDate,
-                game.puzzle.id,
-                game.puzzle.solution,
-                game.puzzle.puzzleNumber,
-                JSON.stringify(game.guesses),
-                game.status,
-            );
+            .run(userId, printDate, JSON.stringify(game.guesses), game.status);
+    }
+
+    private savePuzzle(puzzle: WordlePuzzle): void {
+        const result = this.database
+            .prepare(
+                `
+                    INSERT INTO wordle_puzzles (
+                        print_date,
+                        puzzle_id,
+                        solution,
+                        puzzle_number,
+                        updated_at
+                    )
+                    VALUES (?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+                    ON CONFLICT (print_date) DO UPDATE SET
+                        updated_at = excluded.updated_at
+                    WHERE wordle_puzzles.puzzle_id = excluded.puzzle_id
+                        AND wordle_puzzles.solution = excluded.solution
+                        AND wordle_puzzles.puzzle_number = excluded.puzzle_number
+                `,
+            )
+            .run(puzzle.printDate, puzzle.id, puzzle.solution, puzzle.puzzleNumber);
+
+        if (result.changes === 0) {
+            throw new Error(`이미 저장된 Wordle 퍼즐과 정보가 다릅니다: ${puzzle.printDate}`);
+        }
     }
 
     private saveGuildParticipantActivity(

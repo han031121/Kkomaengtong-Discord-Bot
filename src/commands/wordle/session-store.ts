@@ -5,13 +5,13 @@ import type {
     ModalSubmitInteraction,
 } from "discord.js";
 
-import { WordleDataStore } from "../../features/wordle/data-store.js";
+import { getPreviousWordlePrintDate, WordleDataStore } from "../../features/wordle/data-store.js";
 import type {
     WordleDataStoreOptions,
     WordlePublicStatusPanel,
     WordleRecentPlayers,
 } from "../../features/wordle/data-store.js";
-import type { WordleGame } from "../../features/wordle/game.js";
+import type { WordleGame, WordlePuzzle } from "../../features/wordle/game.js";
 
 export type { WordlePublicStatusPanel } from "../../features/wordle/data-store.js";
 
@@ -37,6 +37,25 @@ export class WordleSessionStore {
 
     public constructor(options: WordleDataStoreOptions = {}) {
         this.dataStore = new WordleDataStore(options);
+    }
+
+    public activatePuzzle(puzzle: WordlePuzzle): void {
+        const activePrintDate = this.dataStore.activatePuzzle(puzzle);
+
+        const retainedPrintDates = new Set([
+            activePrintDate,
+            getPreviousWordlePrintDate(activePrintDate),
+        ]);
+
+        for (const [key, state] of this.serverStates) {
+            if (!retainedPrintDates.has(state.printDate)) {
+                this.serverStates.delete(key);
+            }
+        }
+    }
+
+    public getPuzzle(printDate: string): WordlePuzzle | undefined {
+        return this.dataStore.getPuzzle(printDate);
     }
 
     public get(userId: string, printDate: string, guildId: string): WordleSession | undefined {
