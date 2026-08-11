@@ -150,7 +150,7 @@ export function createWordlePublicStatusContainer(
         .addTextDisplayComponents(
             new TextDisplayBuilder().setContent(
                 [
-                    "### 오늘의 Wordle 현황",
+                    "### 오늘의 Wordle 점수판",
                     `-# 최근 활동 순 ${entries.length}명 표시 · 전체 ${totalPlayers}명 · ${printDate}`,
                 ].join("\n"),
             ),
@@ -171,9 +171,9 @@ export function createYesterdayWordleStatusContainer(
         .addTextDisplayComponents(
             new TextDisplayBuilder().setContent(
                 [
-                    "### 어제의 Wordle 기록",
+                    "### 어제의 Wordle 점수판",
                     `**정답 · \`${puzzle.solution.toUpperCase()}\`**`,
-                    "새로운 Wordle이 시작되었습니다!",
+                    "새로운 Wordle이 시작되었습니다!\n",
                     `-# 최근 활동 순 ${entries.length}명 표시 · 전체 ${totalPlayers}명 · ${puzzle.printDate}`,
                 ].join("\n"),
             ),
