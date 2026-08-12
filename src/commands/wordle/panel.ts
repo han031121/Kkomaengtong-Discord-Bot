@@ -148,15 +148,17 @@ export function createWordlePublicStatusContainer(
     const container = new ContainerBuilder()
         .setAccentColor(Colors.Blurple)
         .addTextDisplayComponents(
-            new TextDisplayBuilder().setContent(
-                [
-                    "### 오늘의 Wordle 점수판",
-                    `-# 최근 활동 순 ${entries.length}명 표시 · 전체 ${totalPlayers}명 · ${printDate}`,
-                ].join("\n"),
-            ),
+            new TextDisplayBuilder().setContent( "### 오늘의 Wordle 점수판" ),
+        )
+        .addSeparatorComponents(createSeparator());
+
+    addPublicStatusEntries(container, entries);
+
+    container.addTextDisplayComponents(
+        new TextDisplayBuilder().setContent(`-# 최근 활동 순 ${entries.length}명 표시 · 전체 ${totalPlayers}명 · ${printDate}`),
         );
 
-    return addPublicStatusEntries(container, entries);
+    return container;
 }
 
 export function createYesterdayWordleStatusContainer(
@@ -170,16 +172,26 @@ export function createYesterdayWordleStatusContainer(
         .setAccentColor(Colors.Blurple)
         .addTextDisplayComponents(
             new TextDisplayBuilder().setContent(
+                "### 어제의 Wordle 점수판",
+            ),
+        )
+        .addSeparatorComponents(createSeparator())
+        .addTextDisplayComponents(
+            new TextDisplayBuilder().setContent(
                 [
-                    "### 어제의 Wordle 기록판",
                     `**정답 · \`${puzzle.solution.toUpperCase()}\`**`,
-                    "새로운 Wordle이 시작되었습니다!\n",
-                    `-# 최근 활동 순 ${entries.length}명 표시 · 전체 ${totalPlayers}명 · ${puzzle.printDate}`,
+                    "새로운 Wordle이 시작되었습니다!","\u200B"
                 ].join("\n"),
             ),
         );
 
-    return addPublicStatusEntries(container, entries);
+    addPublicStatusEntries(container, entries);
+
+    container.addTextDisplayComponents(
+        new TextDisplayBuilder().setContent(`-# 최근 활동 순 ${entries.length}명 표시 · 전체 ${totalPlayers}명 · ${puzzle.printDate}`),
+    );
+
+    return container;
 }
 
 function validatePublicStatusEntries(
