@@ -74,6 +74,7 @@ interface InteractionOptions {
     channelId?: string;
     fetchChannel?: Mock;
     fetchMessage?: Mock;
+    fetchGuildMember?: Mock;
     guildId?: string;
     send?: Mock;
     userId?: string;
@@ -99,6 +100,8 @@ export function createCommandInteraction(options: CommandInteractionOptions = {}
     const send = options.send ?? vi.fn();
     const fetchMessage = options.fetchMessage ?? vi.fn();
     const fetchChannel = options.fetchChannel ?? vi.fn();
+    const fetchGuildMember =
+        options.fetchGuildMember ?? vi.fn().mockResolvedValue({ user: { bot: false } });
     const editReply = vi.fn().mockResolvedValue({ id: "private-message" });
     const reply = vi.fn().mockResolvedValue({ id: "reply-message" });
     const deferReply = vi.fn().mockImplementation(() => {
@@ -128,6 +131,10 @@ export function createCommandInteraction(options: CommandInteractionOptions = {}
         },
         deferReply,
         editReply,
+        guild: {
+            id: options.guildId ?? WORDLE_TEST_IDS.guild,
+            members: { fetch: fetchGuildMember },
+        },
         guildId: options.guildId ?? WORDLE_TEST_IDS.guild,
         options: {
             getSubcommand: () => subcommand,
@@ -146,6 +153,7 @@ export function createCommandInteraction(options: CommandInteractionOptions = {}
         deferReply,
         editReply,
         fetchChannel,
+        fetchGuildMember,
         fetchMessage,
         getUser,
         interaction,

@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import type { Guild } from "discord.js";
+import { describe, expect, it, vi } from "vitest";
 
 import {
     createWordleGame,
@@ -7,7 +8,13 @@ import {
     submitGuess,
 } from "../src/features/wordle/game.js";
 import type { WordlePuzzle } from "../src/features/wordle/game.js";
+import type { WordleGuildPersonalRecord } from "../src/commands/wordle/session-store.js";
 import {
+    createWordleServerRecordRankings,
+    filterCurrentGuildMemberRecords,
+} from "../src/commands/wordle/record-rankings.js";
+import {
+    createAllWordleRecordsContainer,
     createPersonalWordleRecordContainer,
     createPrivateWordleContainer,
     createPublicWordleContainer,
@@ -21,6 +28,27 @@ const puzzle = {
     ...WORDLE_TEST_PUZZLE,
     puzzleNumber: 1890,
 };
+
+function createGuildPersonalRecord(
+    userId: string,
+    recentSuccessStreak: number,
+    winRate: number | undefined,
+    averageGuessCount: number | undefined,
+): WordleGuildPersonalRecord {
+    return {
+        record: {
+            averageGuessCount,
+            fakeSpoilerCount: 0,
+            genuineSpoilerCount: 0,
+            playedCount: winRate === undefined ? 0 : 1,
+            recentSuccessStreak,
+            successCount: averageGuessCount === undefined ? 0 : 1,
+            unregisteredWordCount: 0,
+            winRate,
+        },
+        userId,
+    };
+}
 
 function expectPlayButton(component: unknown): void {
     expect(component).toMatchObject({
@@ -165,6 +193,138 @@ describe("Wordle 개인 기록 패널", () => {
     });
 });
 
+describe("Wordle 전체 기록 순위 패널", () => {
+    it("세 가지 순위와 기록 보유자 수를 항목별 단위에 맞춰 표시합니다", () => {
+        const containerJson = JSON.stringify(
+            createAllWordleRecordsContainer({
+                averageGuessCount: [
+                    { userId: "12345678901234567", value: 2.25 },
+                    { userId: "13345678901234567", value: 3 },
+                ],
+                recentSuccessStreak: [
+                    { userId: "13345678901234567", value: 4 },
+                    { userId: "12345678901234567", value: 2 },
+                ],
+                recordHolderCount: 2,
+                winRate: [
+                    { userId: "12345678901234567", value: 75 },
+                    { userId: "13345678901234567", value: 50 },
+                ],
+            }).toJSON(),
+        );
+
+        expect(containerJson).toContain("### 현재 서버 Wordle 기록 순위");
+        expect(containerJson).toContain("기록 보유자 2명 · 항목별 최대 5위");
+        expect(containerJson).toContain("1. <@13345678901234567> · **4일**");
+        expect(containerJson).toContain("1. <@12345678901234567> · **75.0%**");
+        expect(containerJson).toContain("1. <@12345678901234567> · **2.3회**");
+    });
+
+    it("계산 가능한 기록이 없는 항목은 기록 없음으로 표시합니다", () => {
+        const containerJson = JSON.stringify(
+            createAllWordleRecordsContainer({
+                averageGuessCount: [],
+                recentSuccessStreak: [],
+                recordHolderCount: 0,
+                winRate: [],
+            }).toJSON(),
+        );
+
+        expect(containerJson.match(/기록 없음/g)).toHaveLength(3);
+    });
+});
+
+describe("Wordle 서버 기록 순위", () => {
+    it("항목별 방향으로 정렬해 최대 다섯 명만 반환하고 계산되지 않은 값은 제외합니다", () => {
+        const records = [
+            createGuildPersonalRecord("5", 2, 80, 2.5),
+            createGuildPersonalRecord("2", 4, 100, 3),
+            createGuildPersonalRecord("4", 4, 90, 2),
+            createGuildPersonalRecord("1", 1, undefined, undefined),
+            createGuildPersonalRecord("3", 3, 70, 4),
+            createGuildPersonalRecord("6", 5, 60, 5),
+            createGuildPersonalRecord("7", 0, 50, 6),
+        ];
+
+        expect(createWordleServerRecordRankings(records)).toEqual({
+            averageGuessCount: [
+                { userId: "4", value: 2 },
+                { userId: "5", value: 2.5 },
+                { userId: "2", value: 3 },
+                { userId: "3", value: 4 },
+                { userId: "6", value: 5 },
+            ],
+            recentSuccessStreak: [
+                { userId: "6", value: 5 },
+                { userId: "2", value: 4 },
+                { userId: "4", value: 4 },
+                { userId: "3", value: 3 },
+                { userId: "5", value: 2 },
+            ],
+            recordHolderCount: 7,
+            winRate: [
+                { userId: "2", value: 100 },
+                { userId: "4", value: 90 },
+                { userId: "5", value: 80 },
+                { userId: "3", value: 70 },
+                { userId: "6", value: 60 },
+            ],
+        });
+    });
+
+    it("현재 서버의 일반 사용자 기록만 남깁니다", async () => {
+        const records = [
+            createGuildPersonalRecord("1", 1, 100, 1),
+            createGuildPersonalRecord("2", 1, 100, 1),
+            createGuildPersonalRecord("3", 1, 100, 1),
+        ];
+        const fetch = vi.fn((userId: string) => {
+            if (userId === "2") {
+                return Promise.reject(Object.assign(new Error("Unknown Member"), { code: 10_007 }));
+            }
+
+            return Promise.resolve({ user: { bot: userId === "3" } });
+        });
+        const guild = { members: { fetch } } as unknown as Guild;
+
+        await expect(filterCurrentGuildMemberRecords(guild, records)).resolves.toEqual([
+            records[0],
+        ]);
+        expect(fetch).toHaveBeenCalledTimes(3);
+    });
+
+    it("테스트 모드에서는 알 수 없는 사용자 기록을 유지합니다", async () => {
+        const currentRecord = createGuildPersonalRecord("1", 1, 100, 1);
+        const unknownRecord = createGuildPersonalRecord("2", 2, 100, 1);
+        const guild = {
+            members: {
+                fetch: vi.fn((userId: string) =>
+                    userId === unknownRecord.userId
+                        ? Promise.reject(
+                              Object.assign(new Error("Unknown Member"), { code: 10_007 }),
+                          )
+                        : Promise.resolve({ user: { bot: false } }),
+                ),
+            },
+        } as unknown as Guild;
+
+        await expect(
+            filterCurrentGuildMemberRecords(guild, [currentRecord, unknownRecord], true),
+        ).resolves.toEqual([currentRecord, unknownRecord]);
+    });
+
+    it("구성원 부재 이외의 Discord 조회 오류는 숨기지 않습니다", async () => {
+        const error = new Error("Discord API unavailable");
+        const guild = {
+            members: { fetch: vi.fn().mockRejectedValue(error) },
+        } as unknown as Guild;
+
+        await expect(
+            filterCurrentGuildMemberRecords(guild, [createGuildPersonalRecord("1", 1, 100, 1)]),
+        ).rejects.toBe(error);
+    });
+});
+
 describe("Wordle 공개 현황 패널", () => {
     it("사용자 상태를 두 줄과 accessory 보기 버튼으로 표시합니다", () => {
         const game = submitGuess(createWordleGame(puzzle), "alley");
@@ -180,8 +340,8 @@ describe("Wordle 공개 현황 패널", () => {
         ).toJSON();
         const panelJson = JSON.stringify(container);
 
-        expect(container.components.map((component) => component.type)).toEqual([10, 9]);
-        expect(container.components[1]).toMatchObject({
+        expect(container.components.map((component) => component.type)).toEqual([10, 14, 9, 10]);
+        expect(container.components[2]).toMatchObject({
             components: [
                 {
                     type: 10,

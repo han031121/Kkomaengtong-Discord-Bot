@@ -339,7 +339,7 @@ describe("Wordle SQLite 세션 저장소", () => {
         });
     });
 
-    it("서버 참여 활동 순번과 채널별 공개 현황 메시지를 재시작 후에도 복원합니다", () => {
+    it("서버 참여 활동 순번과 공개 현황·전체 기록 메시지를 재시작 후에도 복원합니다", () => {
         const databasePath = createDatabasePath();
         const firstStore = openStore(databasePath);
         const game = submitGuess(createWordleGame(puzzle), "crane");
@@ -352,6 +352,16 @@ describe("Wordle SQLite 세션 저장소", () => {
             channelId,
             messageId,
             printDate: puzzle.printDate,
+        });
+        firstStore.setServerRecordPanel({
+            guildId,
+            channelId,
+            messageId: "52345678901234567",
+        });
+        firstStore.setServerRecordPanel({
+            guildId,
+            channelId: "62345678901234567",
+            messageId: "72345678901234567",
         });
         firstStore.close();
 
@@ -381,6 +391,71 @@ describe("Wordle SQLite 세션 저장소", () => {
                 printDate: puzzle.printDate,
             },
         ]);
+        expect(restartedStore.getServerRecordPanel(guildId, channelId)).toEqual({
+            guildId,
+            channelId,
+            messageId: "52345678901234567",
+        });
+        expect(restartedStore.getServerRecordPanel(guildId, "62345678901234567")).toEqual({
+            guildId,
+            channelId: "62345678901234567",
+            messageId: "72345678901234567",
+        });
+
+        restartedStore.deleteServerRecordPanel(guildId, channelId);
+
+        expect(restartedStore.getServerRecordPanel(guildId, channelId)).toBeUndefined();
+        expect(restartedStore.getServerRecordPanel(guildId, "62345678901234567")).toBeDefined();
+    });
+
+    it("서버당 하나였던 전체 기록 메시지 스키마를 채널별 스키마로 이관합니다", () => {
+        const databasePath = createDatabasePath();
+        const legacyDatabase = new DatabaseSync(databasePath);
+        const channelId = "32345678901234567";
+        const messageId = "42345678901234567";
+
+        legacyDatabase.exec(`
+            CREATE TABLE wordle_server_record_panels (
+                guild_id TEXT PRIMARY KEY,
+                channel_id TEXT NOT NULL,
+                message_id TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+        `);
+        legacyDatabase
+            .prepare(
+                `
+                    INSERT INTO wordle_server_record_panels (
+                        guild_id,
+                        channel_id,
+                        message_id,
+                        updated_at
+                    )
+                    VALUES (?, ?, ?, ?)
+                `,
+            )
+            .run(guildId, channelId, messageId, "2026-08-13T00:00:00.000Z");
+        legacyDatabase.close();
+
+        const migratedStore = openStore(databasePath);
+
+        expect(migratedStore.getServerRecordPanel(guildId, channelId)).toEqual({
+            guildId,
+            channelId,
+            messageId,
+        });
+
+        migratedStore.setServerRecordPanel({
+            guildId,
+            channelId: "52345678901234567",
+            messageId: "62345678901234567",
+        });
+
+        expect(migratedStore.getServerRecordPanel(guildId, "52345678901234567")).toEqual({
+            guildId,
+            channelId: "52345678901234567",
+            messageId: "62345678901234567",
+        });
     });
 
     it("성공과 실패를 날짜별 한 번만 집계하고 성공률·평균 시도·연속 성공을 계산합니다", () => {
@@ -466,6 +541,46 @@ describe("Wordle SQLite 세션 저장소", () => {
 
         expect(store.getPuzzle(firstPuzzle.printDate)).toBeUndefined();
         expect(store.getPersonalRecord(userId)).toEqual(recordAfterLoss);
+    });
+
+    it("서버 기록 목록에는 해당 서버에서 참여했고 저장 기록이 있는 사용자만 포함합니다", () => {
+        const store = new WordleDataStore();
+        stores.push(store);
+        const otherGuildUserId = "42345678901234567";
+        const recordlessUserId = "52345678901234567";
+        const win = submitGuess(createWordleGame(puzzle), "apple");
+
+        store.recordValidGuess(userId, puzzle.printDate, guildId, WORDLE_TEST_IDS.channel, win);
+        store.recordValidGuess(
+            otherGuildUserId,
+            puzzle.printDate,
+            WORDLE_TEST_IDS.otherGuild,
+            WORDLE_TEST_IDS.channel,
+            win,
+        );
+        store.set(recordlessUserId, puzzle.printDate, createWordleGame(puzzle));
+        store.registerGuildParticipant(
+            recordlessUserId,
+            puzzle.printDate,
+            guildId,
+            WORDLE_TEST_IDS.channel,
+        );
+
+        expect(store.listGuildPersonalRecords(guildId)).toEqual([
+            {
+                record: {
+                    averageGuessCount: 1,
+                    fakeSpoilerCount: 0,
+                    genuineSpoilerCount: 0,
+                    playedCount: 1,
+                    recentSuccessStreak: 1,
+                    successCount: 1,
+                    unregisteredWordCount: 0,
+                    winRate: 100,
+                },
+                userId,
+            },
+        ]);
     });
 
     it("자정 처리에서 시도한 미완료 게임만 중도 포기로 한 번 집계합니다", () => {
@@ -721,7 +836,8 @@ describe("Wordle SQLite 세션 저장소", () => {
                     WHERE type = 'table' AND name IN (
                         'wordle_user_records',
                         'wordle_user_daily_results',
-                        'wordle_guild_record_participants'
+                        'wordle_guild_record_participants',
+                        'wordle_server_record_panels'
                     )
                     ORDER BY name
                 `,
@@ -736,10 +852,11 @@ describe("Wordle SQLite 세션 저장소", () => {
         expect(legacyActivityTable).toBeUndefined();
         expect(recordTables.map((table) => table.name)).toEqual([
             "wordle_guild_record_participants",
+            "wordle_server_record_panels",
             "wordle_user_daily_results",
             "wordle_user_records",
         ]);
         expect(foreignKeyViolations).toEqual([]);
-        expect(userVersion.user_version).toBe(3);
+        expect(userVersion.user_version).toBe(5);
     });
 });

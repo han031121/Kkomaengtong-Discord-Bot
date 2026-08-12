@@ -8,17 +8,21 @@ import type {
 import { getPreviousWordlePrintDate, WordleDataStore } from "../../features/wordle/data-store.js";
 import type {
     WordleDataStoreOptions,
+    WordleGuildPersonalRecord,
     WordlePersonalRecord,
     WordlePublicStatusPanel,
     WordleRecentPlayers,
+    WordleServerRecordPanel,
     WordleSpoilerType,
     WordleYesterdayAnnouncementTarget,
 } from "../../features/wordle/data-store.js";
 import type { WordleGame, WordlePuzzle } from "../../features/wordle/game.js";
 
 export type {
+    WordleGuildPersonalRecord,
     WordlePersonalRecord,
     WordlePublicStatusPanel,
+    WordleServerRecordPanel,
     WordleSpoilerType,
     WordleYesterdayAnnouncementTarget,
 } from "../../features/wordle/data-store.js";
@@ -124,6 +128,10 @@ export class WordleSessionStore {
         return this.dataStore.getPersonalRecord(userId);
     }
 
+    public listGuildPersonalRecords(guildId: string): readonly WordleGuildPersonalRecord[] {
+        return this.dataStore.listGuildPersonalRecords(guildId);
+    }
+
     public recordSpoilerUse(userId: string, spoilerType: WordleSpoilerType): void {
         this.dataStore.recordSpoilerUse(userId, spoilerType);
     }
@@ -206,6 +214,21 @@ export class WordleSessionStore {
 
     public deletePublicStatusPanel(guildId: string, channelId: string): void {
         this.dataStore.deletePublicStatusPanel(guildId, channelId);
+    }
+
+    public getServerRecordPanel(
+        guildId: string,
+        channelId: string,
+    ): WordleServerRecordPanel | undefined {
+        return this.dataStore.getServerRecordPanel(guildId, channelId);
+    }
+
+    public setServerRecordPanel(panel: WordleServerRecordPanel): void {
+        this.dataStore.setServerRecordPanel(panel);
+    }
+
+    public deleteServerRecordPanel(guildId: string, channelId: string): void {
+        this.dataStore.deleteServerRecordPanel(guildId, channelId);
     }
 
     public close(): void {

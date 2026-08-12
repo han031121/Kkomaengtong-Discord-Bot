@@ -40,8 +40,10 @@ export {
 
 export { WordleSessionStore } from "./wordle/session-store.js";
 export type {
+    WordleGuildPersonalRecord,
     WordlePersonalRecord,
     WordlePublicStatusPanel,
+    WordleServerRecordPanel,
     WordleSession,
     WordleSpoilerType,
     WordleYesterdayAnnouncementTarget,

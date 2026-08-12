@@ -27,6 +27,11 @@ import type { WordleInteraction } from "./interaction-builders.js";
 import { processWordleGuess } from "./guess-processing.js";
 import type { WordleDictionary } from "./guess-processing.js";
 import { createPersonalWordleRecordContainer } from "./panel.js";
+import { replaceWordleServerRecordPanel } from "./record-message.js";
+import {
+    createWordleServerRecordRankings,
+    filterCurrentGuildMemberRecords,
+} from "./record-rankings.js";
 import {
     accessWordlePublicStatusPanel,
     refreshWordlePublicStatusPanels,
@@ -285,13 +290,29 @@ export async function runPersonalWordleRecords(
     });
 }
 
-export async function runAllWordleRecords(interaction: ChatInputCommandInteraction): Promise<void> {
-    getWordleGuildId(interaction);
+export async function runAllWordleRecords(
+    interaction: ChatInputCommandInteraction,
+    store: WordleSessionStore,
+    includeUnknownMemberRecords = false,
+): Promise<void> {
+    const guildId = getWordleGuildId(interaction);
+    const guild = interaction.guild;
 
-    await interaction.reply({
-        content: "현재 서버의 Wordle 전체 기록 및 랭킹 기능은 준비 중입니다.",
-        flags: MessageFlags.Ephemeral,
-    });
+    if (guild === null) {
+        throw new Error("Wordle 전체 기록을 조회할 서버를 찾을 수 없습니다.");
+    }
+
+    await interaction.deferReply();
+
+    const storedRecords = store.listGuildPersonalRecords(guildId);
+    const currentMemberRecords = await filterCurrentGuildMemberRecords(
+        guild,
+        storedRecords,
+        includeUnknownMemberRecords,
+    );
+    const rankings = createWordleServerRecordRankings(currentMemberRecords);
+
+    await replaceWordleServerRecordPanel(interaction, store, rankings);
 }
 
 export function createWordleCommand(
@@ -311,7 +332,7 @@ export function createWordleCommand(
                     case WORDLE_PERSONAL_RECORDS_SUBCOMMAND_NAME:
                         return runPersonalWordleRecords(interaction, store);
                     case WORDLE_ALL_RECORDS_SUBCOMMAND_NAME:
-                        return runAllWordleRecords(interaction);
+                        return runAllWordleRecords(interaction, store, enableTestCommands);
                     default:
                         throw new Error(
                             `지원하지 않는 Wordle 기록 서브커맨드입니다: ${subcommand}`,

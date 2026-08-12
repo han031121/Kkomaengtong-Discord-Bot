@@ -43,6 +43,17 @@ export interface WordlePersonalRecord {
     winRate: number | undefined;
 }
 
+export interface WordleGuildPersonalRecord {
+    record: WordlePersonalRecord;
+    userId: string;
+}
+
+export interface WordleServerRecordPanel {
+    channelId: string;
+    guildId: string;
+    messageId: string;
+}
+
 export type WordleSpoilerType = "fake" | "genuine";
 
 type WordleDailyResult = "abandoned" | "lost" | "won";
@@ -82,12 +93,19 @@ interface PersistedPublicStatusPanel {
     print_date: string;
 }
 
+interface PersistedServerRecordPanel {
+    channel_id: string;
+    guild_id: string;
+    message_id: string;
+}
+
 interface PersistedTableName {
     name: string;
 }
 
 interface PersistedTableColumn {
     name: string;
+    pk: number;
 }
 
 interface PersistedPrintDate {
@@ -110,6 +128,10 @@ interface PersistedWordlePersonalRecord {
     unregistered_word_count: number;
 }
 
+interface PersistedGuildPersonalRecord extends PersistedWordlePersonalRecord {
+    user_id: string;
+}
+
 interface PersistedCompletableGame {
     guesses_json: string;
     print_date: string;
@@ -123,7 +145,7 @@ interface PersistedDailyResult {
     result: string;
 }
 
-const WORDLE_SCHEMA_VERSION = 3;
+const WORDLE_SCHEMA_VERSION = 5;
 
 export function getPreviousWordlePrintDate(printDate: string): string {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(printDate)) {
@@ -228,6 +250,7 @@ export class WordleDataStore {
             PRAGMA busy_timeout = 5000;
         `);
         this.migrateSchema();
+        this.migrateServerRecordPanelSchema();
         this.database.exec("PRAGMA foreign_keys = ON;");
     }
 
@@ -345,52 +368,35 @@ export class WordleDataStore {
             )
             .get(userId) as PersistedWordlePersonalRecord | undefined;
 
-        if (row === undefined) {
-            return {
-                averageGuessCount: undefined,
-                fakeSpoilerCount: 0,
-                genuineSpoilerCount: 0,
-                playedCount: 0,
-                recentSuccessStreak: 0,
-                successCount: 0,
-                unregisteredWordCount: 0,
-                winRate: undefined,
-            };
-        }
+        return row === undefined ? this.createEmptyPersonalRecord() : this.parsePersonalRecord(row);
+    }
 
-        const counts = [
-            row.success_count,
-            row.played_count,
-            row.successful_guess_count_sum,
-            row.current_success_streak,
-            row.genuine_spoiler_count,
-            row.fake_spoiler_count,
-            row.unregistered_word_count,
-        ];
+    public listGuildPersonalRecords(guildId: string): readonly WordleGuildPersonalRecord[] {
+        const rows = this.database
+            .prepare(
+                `
+                    SELECT DISTINCT
+                        record.user_id,
+                        record.success_count,
+                        record.played_count,
+                        record.successful_guess_count_sum,
+                        record.current_success_streak,
+                        record.genuine_spoiler_count,
+                        record.fake_spoiler_count,
+                        record.unregistered_word_count
+                    FROM wordle_guild_record_participants AS participant
+                    INNER JOIN wordle_user_records AS record
+                        ON record.user_id = participant.user_id
+                    WHERE participant.guild_id = ?
+                    ORDER BY record.user_id
+                `,
+            )
+            .all(guildId) as unknown as PersistedGuildPersonalRecord[];
 
-        if (
-            counts.some((count) => !Number.isSafeInteger(count) || count < 0) ||
-            row.success_count > row.played_count ||
-            row.successful_guess_count_sum < row.success_count ||
-            row.successful_guess_count_sum > row.success_count * 6
-        ) {
-            throw new Error("SQLite에 저장된 Wordle 개인 기록이 올바르지 않습니다.");
-        }
-
-        return {
-            averageGuessCount:
-                row.success_count === 0
-                    ? undefined
-                    : row.successful_guess_count_sum / row.success_count,
-            fakeSpoilerCount: row.fake_spoiler_count,
-            genuineSpoilerCount: row.genuine_spoiler_count,
-            playedCount: row.played_count,
-            recentSuccessStreak: row.current_success_streak,
-            successCount: row.success_count,
-            unregisteredWordCount: row.unregistered_word_count,
-            winRate:
-                row.played_count === 0 ? undefined : (row.success_count / row.played_count) * 100,
-        };
+        return rows.map((row) => ({
+            record: this.parsePersonalRecord(row),
+            userId: row.user_id,
+        }));
     }
 
     public recordSpoilerUse(userId: string, spoilerType: WordleSpoilerType): void {
@@ -647,6 +653,59 @@ export class WordleDataStore {
             .run(guildId, channelId);
     }
 
+    public getServerRecordPanel(
+        guildId: string,
+        channelId: string,
+    ): WordleServerRecordPanel | undefined {
+        const row = this.database
+            .prepare(
+                `
+                    SELECT guild_id, channel_id, message_id
+                    FROM wordle_server_record_panels
+                    WHERE guild_id = ? AND channel_id = ?
+                `,
+            )
+            .get(guildId, channelId) as PersistedServerRecordPanel | undefined;
+
+        return row === undefined
+            ? undefined
+            : {
+                  channelId: row.channel_id,
+                  guildId: row.guild_id,
+                  messageId: row.message_id,
+              };
+    }
+
+    public setServerRecordPanel(panel: WordleServerRecordPanel): void {
+        this.database
+            .prepare(
+                `
+                    INSERT INTO wordle_server_record_panels (
+                        guild_id,
+                        channel_id,
+                        message_id,
+                        updated_at
+                    )
+                    VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+                    ON CONFLICT (guild_id, channel_id) DO UPDATE SET
+                        message_id = excluded.message_id,
+                        updated_at = excluded.updated_at
+                `,
+            )
+            .run(panel.guildId, panel.channelId, panel.messageId);
+    }
+
+    public deleteServerRecordPanel(guildId: string, channelId: string): void {
+        this.database
+            .prepare(
+                `
+                    DELETE FROM wordle_server_record_panels
+                    WHERE guild_id = ? AND channel_id = ?
+                `,
+            )
+            .run(guildId, channelId);
+    }
+
     public close(): void {
         if (this.databaseClosed) {
             return;
@@ -745,6 +804,14 @@ export class WordleDataStore {
                 FOREIGN KEY (print_date)
                     REFERENCES wordle_puzzles (print_date)
                     ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS wordle_server_record_panels (
+                guild_id TEXT NOT NULL,
+                channel_id TEXT NOT NULL,
+                message_id TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (guild_id, channel_id)
             );
 
             CREATE TABLE IF NOT EXISTS wordle_yesterday_announcements (
@@ -1064,6 +1131,50 @@ export class WordleDataStore {
         return row !== undefined;
     }
 
+    private migrateServerRecordPanelSchema(): void {
+        const columns = this.database
+            .prepare("PRAGMA table_info(wordle_server_record_panels)")
+            .all() as unknown as PersistedTableColumn[];
+        const guildIdColumn = columns.find((column) => column.name === "guild_id");
+        const channelIdColumn = columns.find((column) => column.name === "channel_id");
+
+        if (guildIdColumn?.pk === 1 && channelIdColumn?.pk === 2) {
+            return;
+        }
+
+        this.database.exec("BEGIN IMMEDIATE;");
+
+        try {
+            this.database.exec(`
+                ALTER TABLE wordle_server_record_panels
+                RENAME TO wordle_server_record_panels_server_scoped;
+
+                CREATE TABLE wordle_server_record_panels (
+                    guild_id TEXT NOT NULL,
+                    channel_id TEXT NOT NULL,
+                    message_id TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY (guild_id, channel_id)
+                );
+
+                INSERT INTO wordle_server_record_panels (
+                    guild_id,
+                    channel_id,
+                    message_id,
+                    updated_at
+                )
+                SELECT guild_id, channel_id, message_id, updated_at
+                FROM wordle_server_record_panels_server_scoped;
+
+                DROP TABLE wordle_server_record_panels_server_scoped;
+                COMMIT;
+            `);
+        } catch (error) {
+            this.database.exec("ROLLBACK;");
+            throw error;
+        }
+    }
+
     private loadGame(userId: string, printDate: string): WordleGame | undefined {
         const row = this.database
             .prepare(
@@ -1127,6 +1238,55 @@ export class WordleDataStore {
         }
 
         return puzzle;
+    }
+
+    private createEmptyPersonalRecord(): WordlePersonalRecord {
+        return {
+            averageGuessCount: undefined,
+            fakeSpoilerCount: 0,
+            genuineSpoilerCount: 0,
+            playedCount: 0,
+            recentSuccessStreak: 0,
+            successCount: 0,
+            unregisteredWordCount: 0,
+            winRate: undefined,
+        };
+    }
+
+    private parsePersonalRecord(row: PersistedWordlePersonalRecord): WordlePersonalRecord {
+        const counts = [
+            row.success_count,
+            row.played_count,
+            row.successful_guess_count_sum,
+            row.current_success_streak,
+            row.genuine_spoiler_count,
+            row.fake_spoiler_count,
+            row.unregistered_word_count,
+        ];
+
+        if (
+            counts.some((count) => !Number.isSafeInteger(count) || count < 0) ||
+            row.success_count > row.played_count ||
+            row.successful_guess_count_sum < row.success_count ||
+            row.successful_guess_count_sum > row.success_count * 6
+        ) {
+            throw new Error("SQLite에 저장된 Wordle 개인 기록이 올바르지 않습니다.");
+        }
+
+        return {
+            averageGuessCount:
+                row.success_count === 0
+                    ? undefined
+                    : row.successful_guess_count_sum / row.success_count,
+            fakeSpoilerCount: row.fake_spoiler_count,
+            genuineSpoilerCount: row.genuine_spoiler_count,
+            playedCount: row.played_count,
+            recentSuccessStreak: row.current_success_streak,
+            successCount: row.success_count,
+            unregisteredWordCount: row.unregistered_word_count,
+            winRate:
+                row.played_count === 0 ? undefined : (row.success_count / row.played_count) * 100,
+        };
     }
 
     private saveGame(userId: string, printDate: string, game: WordleGame): void {
