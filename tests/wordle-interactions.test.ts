@@ -416,6 +416,28 @@ describe("Wordle 모달 입력", () => {
         expect(context.deferUpdate).toHaveBeenCalledOnce();
         expect(context.reply).not.toHaveBeenCalled();
         expect(getComponentJson(send)).toContain("# C R A N E");
+        expect(store.getPersonalRecord(userId)).toMatchObject({
+            fakeSpoilerCount: 1,
+            genuineSpoilerCount: 0,
+        });
+    });
+
+    it("정답 스포일러는 찐스포 사용 횟수로 기록합니다", async () => {
+        const store = new WordleSessionStore();
+        const context = createModalInteraction({
+            guess: "APPLE",
+            modalAction: "spoiler",
+        });
+
+        seedSession(store, {
+            game: submitGuess(createWordleGame(puzzle), "apple"),
+        });
+        await handleWordleModal(context.interaction, store, createDictionary());
+
+        expect(store.getPersonalRecord(userId)).toMatchObject({
+            fakeSpoilerCount: 0,
+            genuineSpoilerCount: 1,
+        });
     });
 
     it("사전에 없는 스포일러 단어도 공개합니다", async () => {
@@ -469,8 +491,27 @@ describe("Wordle 모달 입력", () => {
         expect(dictionary.isEnglishWord).toHaveBeenCalledWith("zzzzz");
         expect(store.get(userId, puzzle.printDate, guildId)?.game.guesses).toEqual([]);
         expect(store.getRecentPlayers(guildId, puzzle.printDate, 8).totalPlayers).toBe(0);
+        expect(store.getPersonalRecord(userId).unregisteredWordCount).toBe(1);
         expect(getComponentJson(context.editReply)).toContain("등록된 5글자 영단어가 아닙니다.");
         expect(getComponentJson(context.editReply)).toContain("단어 입력");
+    });
+
+    it("정답 입력 시 성공 횟수·정답률·평균 시도 횟수를 기록합니다", async () => {
+        const store = new WordleSessionStore();
+        const context = createModalInteraction({ guess: "APPLE" });
+
+        seedSession(store, {
+            game: submitGuess(createWordleGame(puzzle), "crane"),
+        });
+        await handleWordleModal(context.interaction, store, createDictionary());
+
+        expect(store.getPersonalRecord(userId)).toMatchObject({
+            averageGuessCount: 2,
+            playedCount: 1,
+            recentSuccessStreak: 1,
+            successCount: 1,
+            winRate: 100,
+        });
     });
 
     it("공유하지 않은 게임에 입력해도 개인 공개 패널을 만들지 않습니다", async () => {

@@ -8,14 +8,18 @@ import type {
 import { getPreviousWordlePrintDate, WordleDataStore } from "../../features/wordle/data-store.js";
 import type {
     WordleDataStoreOptions,
+    WordlePersonalRecord,
     WordlePublicStatusPanel,
     WordleRecentPlayers,
+    WordleSpoilerType,
     WordleYesterdayAnnouncementTarget,
 } from "../../features/wordle/data-store.js";
 import type { WordleGame, WordlePuzzle } from "../../features/wordle/game.js";
 
 export type {
+    WordlePersonalRecord,
     WordlePublicStatusPanel,
+    WordleSpoilerType,
     WordleYesterdayAnnouncementTarget,
 } from "../../features/wordle/data-store.js";
 
@@ -110,6 +114,22 @@ export class WordleSessionStore {
 
         this.storeServerState(userId, printDate, guildId, session);
         return activityOrder;
+    }
+
+    public finalizeAbandonedGames(currentPrintDate: string): number {
+        return this.dataStore.finalizeAbandonedGames(currentPrintDate);
+    }
+
+    public getPersonalRecord(userId: string): WordlePersonalRecord {
+        return this.dataStore.getPersonalRecord(userId);
+    }
+
+    public recordSpoilerUse(userId: string, spoilerType: WordleSpoilerType): void {
+        this.dataStore.recordSpoilerUse(userId, spoilerType);
+    }
+
+    public recordUnregisteredWord(userId: string): void {
+        this.dataStore.recordUnregisteredWord(userId);
     }
 
     public listPendingYesterdayAnnouncements(

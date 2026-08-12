@@ -53,6 +53,7 @@ export async function processWordleGuess(
         const invalidWordMessage =
             "등록된 5글자 영단어가 아닙니다. 입력 횟수는 차감되지 않았습니다.";
 
+        store.recordUnregisteredWord(interaction.user.id);
         await updatePrivateWordleState(interaction, currentSession, invalidWordMessage, store);
         return;
     }

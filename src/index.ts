@@ -8,6 +8,9 @@ const wordleSessionStore = new WordleSessionStore({
 });
 const wordlePuzzleCache = new WordlePuzzleCache();
 const client = createClient(wordleSessionStore, wordlePuzzleCache, env.enableTestCommands);
+wordlePuzzleCache.addBeforeRefreshListener((printDate) => {
+    wordleSessionStore.finalizeAbandonedGames(printDate);
+});
 wordlePuzzleCache.addRefreshListener(async (puzzle) => {
     wordleSessionStore.activatePuzzle(puzzle);
     await publishPendingYesterdayWordleRecords(client, puzzle.printDate, wordleSessionStore);

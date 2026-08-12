@@ -125,6 +125,24 @@ describe("Wordle 퍼즐 캐시", () => {
         expect(refreshListener).toHaveBeenCalledWith(cachedPuzzle);
     });
 
+    it("정답을 요청하기 전에 등록된 자정 전처리 리스너를 실행합니다", async () => {
+        const callOrder: string[] = [];
+        const getPuzzle = vi.fn(() => {
+            callOrder.push("request");
+            return Promise.resolve(cachedPuzzle);
+        });
+        const cache = new WordlePuzzleCache({ getPuzzle });
+        const beforeRefreshListener = vi.fn((printDate: string) => {
+            callOrder.push(`finalize:${printDate}`);
+        });
+
+        cache.addBeforeRefreshListener(beforeRefreshListener);
+        await cache.refresh(new Date("2026-07-22T15:30:00.000Z"));
+
+        expect(beforeRefreshListener).toHaveBeenCalledWith("2026-07-23");
+        expect(callOrder).toEqual(["finalize:2026-07-23", "request"]);
+    });
+
     it("날짜 전환 테스트도 전날 퍼즐 상태를 거쳐 기존 갱신 리스너를 실행합니다", async () => {
         const previousPuzzle = {
             ...cachedPuzzle,

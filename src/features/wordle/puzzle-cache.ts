@@ -9,6 +9,7 @@ const DAILY_REFRESH_WINDOW_MS = 10 * 60_000;
 const MAX_DATE_CHANGE_SEARCH_MS = 48 * 60 * 60 * 1_000;
 
 type RefreshWindowKind = "startup" | "date-change";
+type WordlePuzzleBeforeRefreshListener = (printDate: string) => Promise<void> | void;
 type WordlePuzzleRefreshListener = (puzzle: WordlePuzzle) => Promise<void> | void;
 
 export interface WordlePuzzleRequestOptions {
@@ -58,6 +59,7 @@ export function getMillisecondsUntilNextDateInTimeZone(now: Date, timeZone: stri
 
 export class WordlePuzzleCache {
     private cachedPuzzle: WordlePuzzle | undefined;
+    private readonly beforeRefreshListeners = new Set<WordlePuzzleBeforeRefreshListener>();
     private readonly refreshListeners = new Set<WordlePuzzleRefreshListener>();
     private readonly refreshTimers = new Set<NodeJS.Timeout>();
     private dailyRefreshStarted = false;
@@ -98,8 +100,13 @@ export class WordlePuzzleCache {
         return this.applyRefreshedPuzzle(puzzle);
     }
 
-    private requestPuzzle(now: Date): Promise<WordlePuzzle> {
+    private async requestPuzzle(now: Date): Promise<WordlePuzzle> {
         const printDate = formatDateInTimeZone(now, this.timeZone);
+
+        for (const listener of this.beforeRefreshListeners) {
+            await listener(printDate);
+        }
+
         return this.client.getPuzzle(printDate, { forceRefresh: true });
     }
 
@@ -125,6 +132,14 @@ export class WordlePuzzleCache {
 
         return () => {
             this.refreshListeners.delete(listener);
+        };
+    }
+
+    public addBeforeRefreshListener(listener: WordlePuzzleBeforeRefreshListener): () => void {
+        this.beforeRefreshListeners.add(listener);
+
+        return () => {
+            this.beforeRefreshListeners.delete(listener);
         };
     }
 

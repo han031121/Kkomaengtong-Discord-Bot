@@ -123,6 +123,7 @@ export async function handleSpoilerButton(
     interaction: ButtonInteraction | ModalSubmitInteraction,
     session: WordleSession,
     spoilerWord: string,
+    store: WordleSessionStore = defaultWordleSessionStore,
 ): Promise<void> {
     const { user } = interaction;
     await interaction.deferUpdate();
@@ -142,6 +143,10 @@ export async function handleSpoilerButton(
         flags: MessageFlags.IsComponentsV2,
         allowedMentions: { users: [user.id] },
     });
+    store.recordSpoilerUse(
+        user.id,
+        spoilerWord === session.game.puzzle.solution ? "genuine" : "fake",
+    );
 }
 
 async function handlePublicStatusViewButton(
@@ -311,7 +316,7 @@ export async function handleWordleModal(
             return;
         }
 
-        await handleSpoilerButton(interaction, session, spoilerWord);
+        await handleSpoilerButton(interaction, session, spoilerWord, store);
         return;
     }
 

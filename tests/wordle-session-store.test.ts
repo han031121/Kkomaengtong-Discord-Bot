@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createWordleGame, submitGuess } from "../src/features/wordle/game.js";
 import { getPreviousWordlePrintDate, WordleDataStore } from "../src/features/wordle/data-store.js";
 import { WORDLE_TEST_IDS, WORDLE_TEST_PUZZLE } from "./wordle-test-helpers.js";
+import { createLostGame } from "./wordle-test-helpers.js";
 
 const puzzle = {
     ...WORDLE_TEST_PUZZLE,
@@ -382,6 +383,178 @@ describe("Wordle SQLite 세션 저장소", () => {
         ]);
     });
 
+    it("성공과 실패를 날짜별 한 번만 집계하고 성공률·평균 시도·연속 성공을 계산합니다", () => {
+        const store = new WordleDataStore();
+        stores.push(store);
+        const firstPuzzle = {
+            ...puzzle,
+            id: puzzle.id - 1,
+            printDate: "2026-07-23",
+            puzzleNumber: puzzle.puzzleNumber - 1,
+        };
+        const firstWin = submitGuess(submitGuess(createWordleGame(firstPuzzle), "crane"), "apple");
+        const secondWin = submitGuess(
+            submitGuess(submitGuess(createWordleGame(puzzle), "crane"), "slate"),
+            "apple",
+        );
+
+        store.recordValidGuess(
+            userId,
+            firstPuzzle.printDate,
+            guildId,
+            WORDLE_TEST_IDS.channel,
+            firstWin,
+        );
+        store.recordValidGuess(
+            userId,
+            firstPuzzle.printDate,
+            guildId,
+            WORDLE_TEST_IDS.channel,
+            firstWin,
+        );
+        store.recordValidGuess(
+            userId,
+            puzzle.printDate,
+            guildId,
+            WORDLE_TEST_IDS.channel,
+            secondWin,
+        );
+
+        expect(store.getPersonalRecord(userId)).toEqual({
+            averageGuessCount: 2.5,
+            fakeSpoilerCount: 0,
+            genuineSpoilerCount: 0,
+            playedCount: 2,
+            recentSuccessStreak: 2,
+            successCount: 2,
+            unregisteredWordCount: 0,
+            winRate: 100,
+        });
+
+        const nextPuzzle = {
+            ...puzzle,
+            id: puzzle.id + 1,
+            printDate: "2026-07-25",
+            puzzleNumber: puzzle.puzzleNumber + 1,
+        };
+        const loss = createLostGame(nextPuzzle);
+
+        store.recordValidGuess(
+            userId,
+            nextPuzzle.printDate,
+            guildId,
+            WORDLE_TEST_IDS.channel,
+            loss,
+        );
+
+        const recordAfterLoss = store.getPersonalRecord(userId);
+
+        expect(recordAfterLoss).toMatchObject({
+            averageGuessCount: 2.5,
+            playedCount: 3,
+            recentSuccessStreak: 0,
+            successCount: 2,
+        });
+        expect(recordAfterLoss.winRate).toBeCloseTo(200 / 3);
+
+        store.activatePuzzle({
+            ...puzzle,
+            id: puzzle.id + 2,
+            printDate: "2026-07-26",
+            puzzleNumber: puzzle.puzzleNumber + 2,
+        });
+
+        expect(store.getPuzzle(firstPuzzle.printDate)).toBeUndefined();
+        expect(store.getPersonalRecord(userId)).toEqual(recordAfterLoss);
+    });
+
+    it("자정 처리에서 시도한 미완료 게임만 중도 포기로 한 번 집계합니다", () => {
+        const store = new WordleDataStore();
+        stores.push(store);
+        const attemptedUserId = "42345678901234567";
+        const idleUserId = "52345678901234567";
+        const playingGame = submitGuess(createWordleGame(puzzle), "crane");
+
+        store.recordValidGuess(
+            attemptedUserId,
+            puzzle.printDate,
+            guildId,
+            WORDLE_TEST_IDS.channel,
+            playingGame,
+        );
+        store.set(idleUserId, puzzle.printDate, createWordleGame(puzzle));
+        store.registerGuildParticipant(
+            idleUserId,
+            puzzle.printDate,
+            guildId,
+            WORDLE_TEST_IDS.channel,
+        );
+
+        expect(store.finalizeAbandonedGames("2026-07-25")).toBe(1);
+        expect(store.finalizeAbandonedGames("2026-07-25")).toBe(0);
+        expect(store.getPersonalRecord(attemptedUserId)).toMatchObject({
+            playedCount: 1,
+            recentSuccessStreak: 0,
+            successCount: 0,
+            winRate: 0,
+        });
+        expect(store.getPersonalRecord(idleUserId)).toMatchObject({
+            playedCount: 0,
+            successCount: 0,
+            winRate: undefined,
+        });
+    });
+
+    it("하루를 건너뛰면 정답률은 유지하고 최근 연속 성공만 초기화합니다", () => {
+        const store = new WordleDataStore();
+        stores.push(store);
+        const previousPuzzle = {
+            ...puzzle,
+            id: puzzle.id - 2,
+            printDate: "2026-07-22",
+            puzzleNumber: puzzle.puzzleNumber - 2,
+        };
+        const win = submitGuess(createWordleGame(previousPuzzle), "apple");
+
+        store.recordValidGuess(
+            userId,
+            previousPuzzle.printDate,
+            guildId,
+            WORDLE_TEST_IDS.channel,
+            win,
+        );
+        expect(store.getPersonalRecord(userId).recentSuccessStreak).toBe(1);
+
+        store.finalizeAbandonedGames("2026-07-24");
+
+        expect(store.getPersonalRecord(userId)).toMatchObject({
+            playedCount: 1,
+            recentSuccessStreak: 0,
+            successCount: 1,
+            winRate: 100,
+        });
+    });
+
+    it("찐스포·짭스포·사전 미등록 단어 횟수를 각각 영구 누적합니다", () => {
+        const databasePath = createDatabasePath();
+        const firstStore = openStore(databasePath);
+
+        firstStore.recordSpoilerUse(userId, "genuine");
+        firstStore.recordSpoilerUse(userId, "fake");
+        firstStore.recordSpoilerUse(userId, "fake");
+        firstStore.recordUnregisteredWord(userId);
+        firstStore.recordUnregisteredWord(userId);
+        firstStore.close();
+
+        const restartedStore = openStore(databasePath);
+
+        expect(restartedStore.getPersonalRecord(userId)).toMatchObject({
+            fakeSpoilerCount: 2,
+            genuineSpoilerCount: 1,
+            unregisteredWordCount: 2,
+        });
+    });
+
     it("기존 스키마의 게임과 입력 활동을 정규화된 테이블로 자동 이관합니다", () => {
         const databasePath = createDatabasePath();
         const game = submitGuess(createWordleGame(puzzle), "crane");
@@ -540,6 +713,20 @@ describe("Wordle SQLite 세션 저장소", () => {
                 `,
             )
             .get();
+        const recordTables = migratedDatabase
+            .prepare(
+                `
+                    SELECT name
+                    FROM sqlite_master
+                    WHERE type = 'table' AND name IN (
+                        'wordle_user_records',
+                        'wordle_user_daily_results',
+                        'wordle_guild_record_participants'
+                    )
+                    ORDER BY name
+                `,
+            )
+            .all() as unknown as { name: string }[];
         const foreignKeyViolations = migratedDatabase.prepare("PRAGMA foreign_key_check").all();
         const userVersion = migratedDatabase.prepare("PRAGMA user_version").get() as {
             user_version: number;
@@ -547,7 +734,12 @@ describe("Wordle SQLite 세션 저장소", () => {
         migratedDatabase.close();
 
         expect(legacyActivityTable).toBeUndefined();
+        expect(recordTables.map((table) => table.name)).toEqual([
+            "wordle_guild_record_participants",
+            "wordle_user_daily_results",
+            "wordle_user_records",
+        ]);
         expect(foreignKeyViolations).toEqual([]);
-        expect(userVersion.user_version).toBe(2);
+        expect(userVersion.user_version).toBe(3);
     });
 });

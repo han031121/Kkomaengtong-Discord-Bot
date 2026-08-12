@@ -8,6 +8,7 @@ import {
 } from "../src/features/wordle/game.js";
 import type { WordlePuzzle } from "../src/features/wordle/game.js";
 import {
+    createPersonalWordleRecordContainer,
     createPrivateWordleContainer,
     createPublicWordleContainer,
     createWordlePlayActionRow,
@@ -113,6 +114,54 @@ describe("Wordle 공개 패널", () => {
 
         expect(firstAttemptPanel).toContain("성공 · 1/6 · **_Genius_**");
         expect(secondAttemptPanel).toContain("성공 · 2/6 · **_Magnificent_**");
+    });
+});
+
+describe("Wordle 개인 기록 패널", () => {
+    it("기록이 없으면 계산 대상 통계를 기록 없음으로 표시합니다", () => {
+        const containerJson = JSON.stringify(
+            createPersonalWordleRecordContainer("12345678901234567", {
+                averageGuessCount: undefined,
+                fakeSpoilerCount: 0,
+                genuineSpoilerCount: 0,
+                playedCount: 0,
+                recentSuccessStreak: 0,
+                successCount: 0,
+                unregisteredWordCount: 0,
+                winRate: undefined,
+            }).toJSON(),
+        );
+
+        expect(containerJson).toContain("### <@12345678901234567>님의 Wordle 개인 기록");
+        expect(containerJson).toContain("성공 횟수: **0회**");
+        expect(containerJson).toContain("최근 연속 성공: **0일**");
+        expect(containerJson).toContain("정답률: **기록 없음**");
+        expect(containerJson).toContain("평균 시도 횟수: **기록 없음**");
+    });
+
+    it("계산된 기록을 소수점 한 자리와 세부 횟수로 표시합니다", () => {
+        const containerJson = JSON.stringify(
+            createPersonalWordleRecordContainer("12345678901234567", {
+                averageGuessCount: 2.25,
+                fakeSpoilerCount: 4,
+                genuineSpoilerCount: 3,
+                playedCount: 8,
+                recentSuccessStreak: 2,
+                successCount: 6,
+                unregisteredWordCount: 5,
+                winRate: 75,
+            }).toJSON(),
+        );
+
+        expect(containerJson).toContain("성공 횟수: **6회**");
+        expect(containerJson).toContain("최근 연속 성공: **2일**");
+        expect(containerJson).toContain("정답률: **75.0%**");
+        expect(containerJson).toContain("평균 시도 횟수: **2.3회**");
+        expect(containerJson).toContain("  - 찐스포: **3회**");
+        expect(containerJson).toContain("  - 짭스포: **4회**");
+        expect(containerJson).not.toContain("\\t- 찐스포");
+        expect(containerJson).not.toContain("\\t- 짭스포");
+        expect(containerJson).toContain("사전 미등록 단어 입력 횟수: **5회**");
     });
 });
 

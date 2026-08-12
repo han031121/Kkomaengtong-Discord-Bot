@@ -283,7 +283,7 @@ describe("어제 Wordle 기록판", () => {
         );
         const componentJson = JSON.stringify(response.components[0]?.toJSON());
 
-        expect(componentJson).toContain("어제의 Wordle 기록");
+        expect(componentJson).toContain("어제의 Wordle 점수판");
         expect(componentJson).toContain("정답 · `APPLE`");
         expect(componentJson).toContain(`<@${WORDLE_TEST_IDS.user}> **진행 중** · **1/6**`);
         expect(componentJson).toContain(
@@ -340,7 +340,7 @@ describe("어제 Wordle 기록판", () => {
             components: { toJSON(): unknown }[];
             flags: number;
         }>(context.reply);
-        expect(JSON.stringify(response.components[0]?.toJSON())).toContain("어제의 Wordle 기록");
+        expect(JSON.stringify(response.components[0]?.toJSON())).toContain("어제의 Wordle 점수판");
         expect(response.allowedMentions.users).toEqual([WORDLE_TEST_IDS.user]);
         expect(response.flags).toBe(32_768);
 

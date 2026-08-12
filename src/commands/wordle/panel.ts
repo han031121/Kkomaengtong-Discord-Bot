@@ -15,6 +15,7 @@ import type {
     WordleGame,
     WordlePuzzle,
 } from "../../features/wordle/game.js";
+import type { WordlePersonalRecord } from "../../features/wordle/data-store.js";
 
 const TILE_EMOJI: Readonly<Record<TileState, string>> = {
     absent: "⬛",
@@ -43,6 +44,38 @@ const PUBLIC_STATUS_PLAYER_LIMIT = 8;
 export interface WordlePublicStatusEntry {
     userId: string;
     game: WordleGame;
+}
+
+export function createPersonalWordleRecordContainer(
+    userId: string,
+    record: WordlePersonalRecord,
+): ContainerBuilder {
+    const winRate = record.winRate === undefined ? "기록 없음" : `${record.winRate.toFixed(1)}%`;
+    const averageGuessCount =
+        record.averageGuessCount === undefined
+            ? "기록 없음"
+            : `${record.averageGuessCount.toFixed(1)}회`;
+
+    return new ContainerBuilder()
+        .setAccentColor(Colors.Blurple)
+        .addTextDisplayComponents(
+            new TextDisplayBuilder().setContent(`### <@${userId}>님의 Wordle 개인 기록`),
+        )
+        .addSeparatorComponents(createSeparator())
+        .addTextDisplayComponents(
+            new TextDisplayBuilder().setContent(
+                [
+                    `- 성공 횟수: **${record.successCount}회**`,
+                    `- 최근 연속 성공: **${record.recentSuccessStreak}일**`,
+                    `- 정답률: **${winRate}**`,
+                    `- 평균 시도 횟수: **${averageGuessCount}**`,
+                    `- 스포일러 사용 횟수`,
+                    `  - 찐스포: **${record.genuineSpoilerCount}회**`,
+                    `  - 짭스포: **${record.fakeSpoilerCount}회**`,
+                    `- 사전 미등록 단어 입력 횟수: **${record.unregisteredWordCount}회**`,
+                ].join("\n"),
+            ),
+        );
 }
 
 function getStatusText(game: WordleGame): string {
@@ -156,7 +189,7 @@ export function createWordlePublicStatusContainer(
 
     container.addTextDisplayComponents(
         new TextDisplayBuilder().setContent(`-# 최근 활동 순 ${entries.length}명 표시 · 전체 ${totalPlayers}명 · ${printDate}`),
-        );
+    );
 
     return container;
 }

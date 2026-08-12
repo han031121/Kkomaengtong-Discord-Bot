@@ -147,15 +147,71 @@ describe("Wordle 실행 진입점", () => {
         );
     });
 
-    it("/워들 기록은 임시 준비 안내를 표시합니다", async () => {
-        const context = createCommandInteraction({ subcommand: "기록" });
+    it("/워들 기록 개인은 사용자를 생략하면 실행자의 빈 기록을 표시합니다", async () => {
+        const context = createCommandInteraction({ subcommand: "개인" });
 
         await createWordleCommand(new WordleSessionStore(), createPuzzleProvider()).execute(
             context.interaction,
         );
 
+        expect(context.getUser).toHaveBeenCalledWith("사용자");
+        const response = getCallArgument<{ flags: number }>(context.reply);
+
+        expect(response.flags).toBe(32_768);
+        expect(getComponentJson(context.reply)).toContain(
+            `### <@${WORDLE_TEST_IDS.user}>님의 Wordle 개인 기록`,
+        );
+    });
+
+    it("/워들 기록 개인은 선택한 사용자의 기록을 표시합니다", async () => {
+        const context = createCommandInteraction({
+            recordUserId: WORDLE_TEST_IDS.otherUser,
+            subcommand: "개인",
+        });
+
+        await createWordleCommand(new WordleSessionStore(), createPuzzleProvider()).execute(
+            context.interaction,
+        );
+
+        expect(getComponentJson(context.reply)).toContain(
+            `### <@${WORDLE_TEST_IDS.otherUser}>님의 Wordle 개인 기록`,
+        );
+    });
+
+    it("/워들 기록 개인은 저장된 게임·스포일러·사전 기록을 형식에 맞게 표시합니다", async () => {
+        const store = new WordleSessionStore();
+        const gameContext = createCommandInteraction();
+
+        await runWordle(gameContext.interaction, {
+            dictionary: createDictionary(),
+            guess: "apple",
+            puzzleProvider: createPuzzleProvider(),
+            store,
+        });
+        store.recordSpoilerUse(WORDLE_TEST_IDS.user, "genuine");
+        store.recordSpoilerUse(WORDLE_TEST_IDS.user, "fake");
+        store.recordUnregisteredWord(WORDLE_TEST_IDS.user);
+
+        const recordContext = createCommandInteraction({ subcommand: "개인" });
+        await createWordleCommand(store, createPuzzleProvider()).execute(recordContext.interaction);
+
+        const panelJson = getComponentJson(recordContext.reply);
+
+        expect(panelJson).toContain("성공 횟수: **1회**");
+        expect(panelJson).toContain("찐스포: **1회**");
+        expect(panelJson).toContain("사전 미등록 단어 입력 횟수: **1회**");
+    });
+
+    it("/워들 기록 전체는 사용자 선택 없이 현재 서버 랭킹 준비 안내를 표시합니다", async () => {
+        const context = createCommandInteraction({ subcommand: "전체" });
+
+        await createWordleCommand(new WordleSessionStore(), createPuzzleProvider()).execute(
+            context.interaction,
+        );
+
+        expect(context.getUser).not.toHaveBeenCalled();
         expect(context.reply).toHaveBeenCalledWith({
-            content: "Wordle 기록 기능은 준비 중입니다.",
+            content: "현재 서버의 Wordle 전체 기록 및 랭킹 기능은 준비 중입니다.",
             flags: 64,
         });
     });

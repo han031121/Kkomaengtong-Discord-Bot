@@ -1,8 +1,9 @@
 export {
     createDefaultWordleCommand,
     createWordleCommand,
+    runAllWordleRecords,
+    runPersonalWordleRecords,
     runWordle,
-    runWordleRecords,
     runWordleScoreboard,
     wordleCommand,
 } from "./wordle/command.js";
@@ -39,7 +40,9 @@ export {
 
 export { WordleSessionStore } from "./wordle/session-store.js";
 export type {
+    WordlePersonalRecord,
     WordlePublicStatusPanel,
     WordleSession,
+    WordleSpoilerType,
     WordleYesterdayAnnouncementTarget,
 } from "./wordle/session-store.js";
