@@ -9,7 +9,14 @@ import {
 import { ActionRowBuilder, ButtonStyle, Colors, SeparatorSpacingSize } from "discord.js";
 
 import { WORDLE_MAX_GUESSES } from "../../features/wordle/game.js";
-import type { GameStatus, TileState, WordleGame } from "../../features/wordle/game.js";
+import type {
+    GameStatus,
+    TileState,
+    WordleGame,
+    WordlePuzzle,
+} from "../../features/wordle/game.js";
+import type { WordlePersonalRecord } from "../../features/wordle/data-store.js";
+import type { WordleRecordRankingEntry, WordleServerRecordRankings } from "./records.js";
 
 const TILE_EMOJI: Readonly<Record<TileState, string>> = {
     absent: "⬛",
@@ -38,6 +45,82 @@ const PUBLIC_STATUS_PLAYER_LIMIT = 8;
 export interface WordlePublicStatusEntry {
     userId: string;
     game: WordleGame;
+}
+
+export function createPersonalWordleRecordContainer(
+    userId: string,
+    record: WordlePersonalRecord,
+): ContainerBuilder {
+    const winRate = record.winRate === undefined ? "기록 없음" : `${record.winRate.toFixed(1)}%`;
+    const averageGuessCount =
+        record.averageGuessCount === undefined
+            ? "기록 없음"
+            : `${record.averageGuessCount.toFixed(1)}회`;
+
+    return new ContainerBuilder()
+        .setAccentColor(Colors.Blurple)
+        .addTextDisplayComponents(
+            new TextDisplayBuilder().setContent(`### <@${userId}>님의 Wordle 개인 기록`),
+        )
+        .addSeparatorComponents(createSeparator())
+        .addTextDisplayComponents(
+            new TextDisplayBuilder().setContent(
+                [
+                    `- 성공 횟수: **${record.successCount}회**`,
+                    `- 연속 성공: **${record.recentSuccessStreak}일**`,
+                    `- 정답률: **${winRate}**`,
+                    `- 평균 시도 횟수: **${averageGuessCount}**`,
+                    `- 스포일러 사용 횟수`,
+                    `  - 찐스포: **${record.genuineSpoilerCount}회**`,
+                    `  - 짭스포: **${record.fakeSpoilerCount}회**`,
+                    `- 사전 미등록 단어 입력 횟수: **${record.unregisteredWordCount}회**`,
+                ].join("\n"),
+            ),
+        );
+}
+
+function formatRecordRanking(
+    entries: readonly WordleRecordRankingEntry[],
+    formatValue: (value: number) => string,
+): string {
+    if (entries.length === 0) {
+        return "기록 없음";
+    }
+
+    return entries
+        .map((entry, index) => `${index + 1}. <@${entry.userId}> · **${formatValue(entry.value)}**`)
+        .join("\n");
+}
+
+export function createAllWordleRecordsContainer(
+    rankings: WordleServerRecordRankings,
+): ContainerBuilder {
+    return new ContainerBuilder()
+        .setAccentColor(Colors.Blurple)
+        .addTextDisplayComponents(
+            new TextDisplayBuilder().setContent("### 현재 서버 Wordle 기록 순위"),
+        )
+        .addSeparatorComponents(createSeparator())
+        .addTextDisplayComponents(
+            new TextDisplayBuilder().setContent(
+                [
+                    "**연속 성공**",
+                    formatRecordRanking(rankings.recentSuccessStreak, (value) => `${value}일`),
+                    "",
+                    "**정답률**",
+                    formatRecordRanking(rankings.winRate, (value) => `${value.toFixed(1)}%`),
+                    "",
+                    "**평균 시도 횟수**",
+                    formatRecordRanking(
+                        rankings.averageGuessCount,
+                        (value) => `${value.toFixed(1)}회`,
+                    ),
+                ].join("\n"),
+            ),
+        )
+        .addTextDisplayComponents(
+            new TextDisplayBuilder().setContent(`-# 항목별 최대 5위까지 표기`),
+        );
 }
 
 function getStatusText(game: WordleGame): string {
@@ -138,6 +221,60 @@ export function createWordlePublicStatusContainer(
     totalPlayers: number,
     printDate: string,
 ): ContainerBuilder {
+    validatePublicStatusEntries(entries, totalPlayers);
+
+    const container = new ContainerBuilder()
+        .setAccentColor(Colors.Blurple)
+        .addTextDisplayComponents(new TextDisplayBuilder().setContent("### 오늘의 Wordle 점수판"))
+        .addSeparatorComponents(createSeparator());
+
+    addPublicStatusEntries(container, entries);
+
+    container.addTextDisplayComponents(
+        new TextDisplayBuilder().setContent(
+            `-# 최근 활동 순 ${entries.length}명 표시 · 전체 ${totalPlayers}명 · ${printDate}`,
+        ),
+    );
+
+    return container;
+}
+
+export function createYesterdayWordleStatusContainer(
+    entries: readonly WordlePublicStatusEntry[],
+    totalPlayers: number,
+    puzzle: WordlePuzzle,
+): ContainerBuilder {
+    validatePublicStatusEntries(entries, totalPlayers);
+
+    const container = new ContainerBuilder()
+        .setAccentColor(Colors.Blurple)
+        .addTextDisplayComponents(new TextDisplayBuilder().setContent("### 어제의 Wordle 점수판"))
+        .addSeparatorComponents(createSeparator())
+        .addTextDisplayComponents(
+            new TextDisplayBuilder().setContent(
+                [
+                    `**정답 · \`${puzzle.solution.toUpperCase()}\`**`,
+                    "새로운 Wordle이 시작되었습니다!",
+                    "\u200B",
+                ].join("\n"),
+            ),
+        );
+
+    addPublicStatusEntries(container, entries);
+
+    container.addTextDisplayComponents(
+        new TextDisplayBuilder().setContent(
+            `-# 최근 활동 순 ${entries.length}명 표시 · 전체 ${totalPlayers}명 · ${puzzle.printDate}`,
+        ),
+    );
+
+    return container;
+}
+
+function validatePublicStatusEntries(
+    entries: readonly WordlePublicStatusEntry[],
+    totalPlayers: number,
+): void {
     if (entries.length > PUBLIC_STATUS_PLAYER_LIMIT) {
         throw new RangeError(
             `Wordle 공개 현황에는 최대 ${PUBLIC_STATUS_PLAYER_LIMIT}명만 표시할 수 있습니다.`,
@@ -147,18 +284,12 @@ export function createWordlePublicStatusContainer(
     if (!Number.isSafeInteger(totalPlayers) || totalPlayers < entries.length) {
         throw new RangeError("Wordle 공개 현황의 전체 참여자 수가 올바르지 않습니다.");
     }
+}
 
-    const container = new ContainerBuilder()
-        .setAccentColor(Colors.Blurple)
-        .addTextDisplayComponents(
-            new TextDisplayBuilder().setContent(
-                [
-                    "### 오늘의 Wordle 현황",
-                    `-# 최근 활동 순 ${entries.length}명 표시 · 전체 ${totalPlayers}명 · ${printDate}`,
-                ].join("\n"),
-            ),
-        );
-
+function addPublicStatusEntries(
+    container: ContainerBuilder,
+    entries: readonly WordlePublicStatusEntry[],
+): ContainerBuilder {
     if (entries.length === 0) {
         return container.addTextDisplayComponents(
             new TextDisplayBuilder().setContent("아직 Wordle에 참여한 사용자가 없습니다."),

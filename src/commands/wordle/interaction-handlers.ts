@@ -49,7 +49,7 @@ async function handlePublicStatusPanelButton(
         if (latestSession === undefined) {
             await interaction.editReply(
                 createNoticeEditResponse(
-                    "Wordle 게임 정보를 찾을 수 없습니다. `/워들`로 게임을 다시 시작해 주세요.",
+                    "Wordle 게임 정보를 찾을 수 없습니다. `/워들 플레이`로 게임을 다시 시작해 주세요.",
                 ),
             );
             return;
@@ -91,7 +91,7 @@ async function handleShareButton(
         if (latestSession === undefined) {
             await interaction.editReply(
                 createNoticeEditResponse(
-                    "Wordle 게임 정보를 찾을 수 없습니다. `/워들`로 게임을 다시 시작해 주세요.",
+                    "Wordle 게임 정보를 찾을 수 없습니다. `/워들 플레이`로 게임을 다시 시작해 주세요.",
                 ),
             );
             return;
@@ -123,6 +123,7 @@ export async function handleSpoilerButton(
     interaction: ButtonInteraction | ModalSubmitInteraction,
     session: WordleSession,
     spoilerWord: string,
+    store: WordleSessionStore = defaultWordleSessionStore,
 ): Promise<void> {
     const { user } = interaction;
     await interaction.deferUpdate();
@@ -142,6 +143,10 @@ export async function handleSpoilerButton(
         flags: MessageFlags.IsComponentsV2,
         allowedMentions: { users: [user.id] },
     });
+    store.recordSpoilerUse(
+        user.id,
+        spoilerWord === session.game.puzzle.solution ? "genuine" : "fake",
+    );
 }
 
 async function handlePublicStatusViewButton(
@@ -284,7 +289,7 @@ export async function handleWordleModal(
     if (session === undefined) {
         await interaction.reply(
             createEphemeralNoticeResponse(
-                "Wordle 게임 정보를 찾을 수 없습니다. `/워들`로 게임을 다시 시작해 주세요.",
+                "Wordle 게임 정보를 찾을 수 없습니다. `/워들 플레이`로 게임을 다시 시작해 주세요.",
             ),
         );
         return;
@@ -311,7 +316,7 @@ export async function handleWordleModal(
             return;
         }
 
-        await handleSpoilerButton(interaction, session, spoilerWord);
+        await handleSpoilerButton(interaction, session, spoilerWord, store);
         return;
     }
 

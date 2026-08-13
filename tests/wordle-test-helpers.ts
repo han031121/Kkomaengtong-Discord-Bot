@@ -74,6 +74,7 @@ interface InteractionOptions {
     channelId?: string;
     fetchChannel?: Mock;
     fetchMessage?: Mock;
+    fetchGuildMember?: Mock;
     guildId?: string;
     send?: Mock;
     userId?: string;
@@ -82,18 +83,31 @@ interface InteractionOptions {
 interface CommandInteractionOptions extends InteractionOptions {
     deferred?: boolean;
     guess?: string | null;
+    recordUserId?: string;
+    subcommand?: "갱신_test" | "기록" | "어제기록_test" | "입력" | "점수판" | "플레이";
 }
 
 export function createCommandInteraction(options: CommandInteractionOptions = {}) {
     let deferred = options.deferred ?? false;
+    const subcommand = options.subcommand ?? "플레이";
     const send = options.send ?? vi.fn();
     const fetchMessage = options.fetchMessage ?? vi.fn();
     const fetchChannel = options.fetchChannel ?? vi.fn();
+    const fetchGuildMember =
+        options.fetchGuildMember ?? vi.fn().mockResolvedValue({ user: { bot: false } });
     const editReply = vi.fn().mockResolvedValue({ id: "private-message" });
+    const reply = vi.fn().mockResolvedValue({ id: "reply-message" });
     const deferReply = vi.fn().mockImplementation(() => {
         deferred = true;
         return Promise.resolve();
     });
+    const getUser = vi.fn(() =>
+        options.recordUserId === undefined
+            ? null
+            : {
+                  id: options.recordUserId,
+              },
+    );
     const interaction = {
         id: "command-interaction",
         get deferred() {
@@ -110,10 +124,17 @@ export function createCommandInteraction(options: CommandInteractionOptions = {}
         },
         deferReply,
         editReply,
+        guild: {
+            id: options.guildId ?? WORDLE_TEST_IDS.guild,
+            members: { fetch: fetchGuildMember },
+        },
         guildId: options.guildId ?? WORDLE_TEST_IDS.guild,
         options: {
+            getSubcommand: () => subcommand,
             getString: () => options.guess ?? null,
+            getUser,
         },
+        reply,
         user: {
             id: options.userId ?? WORDLE_TEST_IDS.user,
             displayAvatarURL: () => "https://cdn.example.com/avatar.png",
@@ -124,8 +145,11 @@ export function createCommandInteraction(options: CommandInteractionOptions = {}
         deferReply,
         editReply,
         fetchChannel,
+        fetchGuildMember,
         fetchMessage,
+        getUser,
         interaction,
+        reply,
         send,
     };
 }

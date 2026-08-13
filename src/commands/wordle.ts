@@ -1,4 +1,11 @@
-export { createWordleCommand, runWordle, wordleCommand } from "./wordle/command.js";
+export {
+    createDefaultWordleCommand,
+    createWordleCommand,
+    runWordle,
+    runWordleRecords,
+    runWordleScoreboard,
+    wordleCommand,
+} from "./wordle/command.js";
 export type { RunWordleOptions, WordlePuzzleProvider } from "./wordle/command.js";
 
 export {
@@ -25,6 +32,18 @@ export {
     sendPublicWordlePanel,
     updatePublicWordlePanel,
 } from "./wordle/public-status.js";
+export {
+    createYesterdayWordleRecordResponse,
+    publishPendingYesterdayWordleRecords,
+} from "./wordle/yesterday-status.js";
 
 export { WordleSessionStore } from "./wordle/session-store.js";
-export type { WordlePublicStatusPanel, WordleSession } from "./wordle/session-store.js";
+export type {
+    WordleGuildPersonalRecord,
+    WordlePersonalRecord,
+    WordlePublicStatusPanel,
+    WordleServerRecordPanel,
+    WordleSession,
+    WordleSpoilerType,
+    WordleYesterdayAnnouncementTarget,
+} from "./wordle/session-store.js";

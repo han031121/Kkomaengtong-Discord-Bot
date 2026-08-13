@@ -22,12 +22,18 @@ export async function processWordleGuess(
     dictionary: WordleDictionary,
 ): Promise<void> {
     const guildId = getWordleGuildId(interaction);
+    const channelId = interaction.channelId;
+
+    if (channelId === null) {
+        throw new Error("Wordle 참여 채널을 찾을 수 없습니다.");
+    }
+
     const currentSession = store.get(interaction.user.id, printDate, guildId);
 
     if (currentSession === undefined) {
         await interaction.editReply(
             createNoticeEditResponse(
-                "Wordle 게임 정보를 찾을 수 없습니다. `/워들`로 게임을 다시 시작해 주세요.",
+                "Wordle 게임 정보를 찾을 수 없습니다. `/워들 플레이`로 게임을 다시 시작해 주세요.",
             ),
         );
         return;
@@ -47,6 +53,7 @@ export async function processWordleGuess(
         const invalidWordMessage =
             "등록된 5글자 영단어가 아닙니다. 입력 횟수는 차감되지 않았습니다.";
 
+        store.recordUnregisteredWord(interaction.user.id);
         await updatePrivateWordleState(interaction, currentSession, invalidWordMessage, store);
         return;
     }
@@ -56,7 +63,13 @@ export async function processWordleGuess(
         ...currentSession,
         game: updatedGame,
     };
-    store.recordValidGuess(interaction.user.id, printDate, guildId, sessionWithUpdatedGame);
+    store.recordValidGuess(
+        interaction.user.id,
+        printDate,
+        guildId,
+        channelId,
+        sessionWithUpdatedGame,
+    );
     const panelMessage = await refreshSharedWordlePanels(interaction, updatedGame, store);
 
     const updatedSession: WordleSession = {

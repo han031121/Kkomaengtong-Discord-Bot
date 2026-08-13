@@ -1,4 +1,5 @@
 import { MessageFlags, SlashCommandBuilder } from "discord.js";
+import type { ChatInputCommandInteraction } from "discord.js";
 
 import { createWordleGame, normalizeGuess } from "../../features/wordle/game.js";
 import type { WordlePuzzle } from "../../features/wordle/game.js";
@@ -8,6 +9,9 @@ import {
     wordlePuzzleCache,
 } from "../../features/wordle/puzzle-cache.js";
 import type { BotCommand } from "../../types/command.js";
+import { runWordleRefreshTest } from "./wordle-refresh-test.js";
+import type { WordlePuzzleRefresher } from "./wordle-refresh-test.js";
+import { runYesterdayWordleTest } from "./yesterday-wordle-test.js";
 import {
     createCompletedResponse,
     createNoticeEditResponse,
@@ -15,17 +19,35 @@ import {
     deletePreviousPrivateResponse,
     getWordleGuildId,
     showPrivateWordleState,
+    SUPPRESSED_ALLOWED_MENTIONS,
     updatePrivateWordleState,
     wordleUserLock,
 } from "./interaction-builders.js";
 import type { WordleInteraction } from "./interaction-builders.js";
 import { processWordleGuess } from "./guess-processing.js";
 import type { WordleDictionary } from "./guess-processing.js";
-import { refreshWordlePublicStatusPanels, updatePublicWordlePanel } from "./public-status.js";
+import { createPersonalWordleRecordContainer } from "./panel.js";
+import {
+    createWordleServerRecordRankings,
+    filterCurrentGuildMemberRecords,
+    replaceWordleServerRecordPanel,
+} from "./records.js";
+import {
+    accessWordlePublicStatusPanel,
+    refreshWordlePublicStatusPanels,
+    updatePublicWordlePanel,
+} from "./public-status.js";
 import type { WordleSession, WordleSessionStore } from "./session-store.js";
 
 const localDictionary = new LocalDictionary();
 const WORDLE_GUESS_OPTION_NAME = "단어";
+const WORDLE_PLAY_SUBCOMMAND_NAME = "플레이";
+const WORDLE_INPUT_SUBCOMMAND_NAME = "입력";
+const WORDLE_SCOREBOARD_SUBCOMMAND_NAME = "점수판";
+const WORDLE_RECORDS_SUBCOMMAND_NAME = "기록";
+const WORDLE_RECORDS_USER_OPTION_NAME = "사용자";
+const WORDLE_REFRESH_TEST_SUBCOMMAND_NAME = "갱신_test";
+const WORDLE_YESTERDAY_RECORD_TEST_SUBCOMMAND_NAME = "어제기록_test";
 
 export interface WordlePuzzleProvider {
     getTodaysPuzzle(now?: Date): WordlePuzzle;
@@ -38,19 +60,70 @@ export interface RunWordleOptions {
     store: WordleSessionStore;
 }
 
-const data = new SlashCommandBuilder()
-    .setName("워들")
-    .setDescription("워들이나 합시다.")
-    .setDMPermission(false);
+function createWordleCommandData(enableTestCommands: boolean) {
+    const data = new SlashCommandBuilder()
+        .setName("워들")
+        .setDescription("워들이나 합시다.")
+        .setDMPermission(false)
+        .addSubcommand((subcommand) =>
+            subcommand
+                .setName(WORDLE_PLAY_SUBCOMMAND_NAME)
+                .setDescription("오늘의 Wordle 플레이 화면을 표시합니다."),
+        )
+        .addSubcommand((subcommand) =>
+            subcommand
+                .setName(WORDLE_INPUT_SUBCOMMAND_NAME)
+                .setDescription("모달 없이 단어를 입력하고 플레이 화면을 표시합니다.")
+                .addStringOption((option) =>
+                    option
+                        .setName(WORDLE_GUESS_OPTION_NAME)
+                        .setDescription("바로 제출할 5글자 영단어")
+                        .setMinLength(5)
+                        .setMaxLength(5)
+                        .setRequired(true),
+                ),
+        )
+        .addSubcommand((subcommand) =>
+            subcommand
+                .setName(WORDLE_SCOREBOARD_SUBCOMMAND_NAME)
+                .setDescription("오늘의 Wordle 점수판을 표시합니다."),
+        )
+        .addSubcommand((subcommand) =>
+            subcommand
+                .setName(WORDLE_RECORDS_SUBCOMMAND_NAME)
+                .setDescription("사용자 개인 기록 또는 현재 서버의 전체 랭킹을 표시합니다.")
+                .addUserOption((option) =>
+                    option
+                        .setName(WORDLE_RECORDS_USER_OPTION_NAME)
+                        .setDescription(
+                            "개인 기록을 확인할 사용자입니다. 생략하면 서버 랭킹입니다.",
+                        )
+                        .setRequired(false),
+                ),
+        );
 
-data.addStringOption((option) =>
-    option
-        .setName(WORDLE_GUESS_OPTION_NAME)
-        .setDescription("모달을 열지 않고 바로 제출할 5글자 영단어")
-        .setMinLength(5)
-        .setMaxLength(5)
-        .setRequired(false),
-);
+    if (enableTestCommands) {
+        data.addSubcommand((subcommand) =>
+            subcommand
+                .setName(WORDLE_REFRESH_TEST_SUBCOMMAND_NAME)
+                .setDescription("오늘의 Wordle 정답 캐시를 강제로 갱신합니다."),
+        ).addSubcommand((subcommand) =>
+            subcommand
+                .setName(WORDLE_YESTERDAY_RECORD_TEST_SUBCOMMAND_NAME)
+                .setDescription("어제의 Wordle 기록판을 테스트합니다."),
+        );
+    }
+
+    return data;
+}
+
+async function showWordlePuzzleUnavailableNotice(interaction: WordleInteraction): Promise<void> {
+    await interaction.editReply(
+        createNoticeEditResponse(
+            "오늘의 Wordle이 아직 준비되지 않았습니다. 봇 시작 또는 날짜 갱신 시 캐시에 실패했을 수 있습니다.",
+        ),
+    );
+}
 
 export async function runWordle(
     interaction: WordleInteraction,
@@ -70,6 +143,12 @@ export async function runWordle(
         const game = createWordleGame(puzzle);
         await wordleUserLock.runExclusive(interaction.user.id, async () => {
             const guildId = getWordleGuildId(interaction);
+            const channelId = interaction.channelId;
+
+            if (channelId === null) {
+                throw new Error("Wordle 참여 채널을 찾을 수 없습니다.");
+            }
+
             const existingSession = store.get(interaction.user.id, puzzle.printDate, guildId);
             let session: WordleSession = existingSession ?? {
                 game,
@@ -94,7 +173,12 @@ export async function runWordle(
             }
 
             store.set(interaction.user.id, puzzle.printDate, guildId, session);
-            store.registerGuildParticipant(interaction.user.id, puzzle.printDate, guildId);
+            store.registerGuildParticipant(
+                interaction.user.id,
+                puzzle.printDate,
+                guildId,
+                channelId,
+            );
             await refreshWordlePublicStatusPanels(interaction, puzzle.printDate, store);
 
             if (rawGuess === undefined) {
@@ -126,11 +210,7 @@ export async function runWordle(
     } catch (error) {
         if (error instanceof WordlePuzzleUnavailableError) {
             console.error("오늘의 NYT Wordle 캐시를 찾을 수 없습니다.", error);
-            await interaction.editReply(
-                createNoticeEditResponse(
-                    "오늘의 Wordle이 아직 준비되지 않았습니다. 봇 시작 또는 날짜 갱신 시 캐시에 실패했을 수 있습니다.",
-                ),
-            );
+            await showWordlePuzzleUnavailableNotice(interaction);
             return;
         }
 
@@ -138,22 +218,136 @@ export async function runWordle(
     }
 }
 
+export async function runWordleScoreboard(
+    interaction: WordleInteraction,
+    store: WordleSessionStore,
+    puzzleProvider: WordlePuzzleProvider = wordlePuzzleCache,
+): Promise<void> {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+    try {
+        const puzzle = puzzleProvider.getTodaysPuzzle();
+        const guildId = getWordleGuildId(interaction);
+        const channelId = interaction.channelId;
+
+        if (channelId === null) {
+            throw new Error("Wordle 점수판을 표시할 채널을 찾을 수 없습니다.");
+        }
+
+        if (store.getPuzzle(puzzle.printDate) === undefined) {
+            store.activatePuzzle(puzzle);
+        }
+
+        const panelAccess = await accessWordlePublicStatusPanel(
+            interaction,
+            puzzle.printDate,
+            store,
+        );
+        const panelUrl = `https://discord.com/channels/${guildId}/${channelId}/${panelAccess.messageId}`;
+        const notice =
+            panelAccess.action === "created"
+                ? "이 채널에 오늘의 Wordle 점수판을 생성했습니다."
+                : panelAccess.action === "existing"
+                  ? "오늘의 Wordle 점수판이 채널의 최신 위치에 있습니다."
+                  : "오늘의 Wordle 점수판을 채널 아래에 다시 생성했습니다.";
+
+        await interaction.editReply(
+            createNoticeEditResponse(`${notice}\n[오늘의 점수판으로 이동](${panelUrl})`),
+        );
+    } catch (error) {
+        if (error instanceof WordlePuzzleUnavailableError) {
+            console.error("오늘의 NYT Wordle 캐시를 찾을 수 없습니다.", error);
+            await showWordlePuzzleUnavailableNotice(interaction);
+            return;
+        }
+
+        throw error;
+    }
+}
+
+export async function runWordleRecords(
+    interaction: ChatInputCommandInteraction,
+    store: WordleSessionStore,
+): Promise<void> {
+    const selectedUser = interaction.options.getUser(WORDLE_RECORDS_USER_OPTION_NAME);
+
+    if (selectedUser !== null) {
+        const record = store.getPersonalRecord(selectedUser.id);
+
+        await interaction.reply({
+            components: [createPersonalWordleRecordContainer(selectedUser.id, record)],
+            flags: /*MessageFlags.Ephemeral |*/ MessageFlags.IsComponentsV2,
+            allowedMentions: SUPPRESSED_ALLOWED_MENTIONS,
+        });
+        return;
+    }
+
+    const guildId = getWordleGuildId(interaction);
+    const guild = interaction.guild;
+
+    if (guild === null) {
+        throw new Error("Wordle 전체 기록을 조회할 서버를 찾을 수 없습니다.");
+    }
+
+    await interaction.deferReply();
+
+    const storedRecords = store.listGuildPersonalRecords(guildId);
+    const currentMemberRecords = await filterCurrentGuildMemberRecords(guild, storedRecords);
+    const rankings = createWordleServerRecordRankings(currentMemberRecords);
+
+    await replaceWordleServerRecordPanel(interaction, store, rankings);
+}
+
 export function createWordleCommand(
     store: WordleSessionStore,
     puzzleProvider: WordlePuzzleProvider = wordlePuzzleCache,
+    puzzleRefresher: WordlePuzzleRefresher = wordlePuzzleCache,
+    enableTestCommands = false,
 ): BotCommand {
     return {
-        data,
-        execute: (interaction) => {
-            const guess = interaction.options.getString(WORDLE_GUESS_OPTION_NAME);
+        data: createWordleCommandData(enableTestCommands),
+        execute: async (interaction) => {
+            const subcommand = interaction.options.getSubcommand();
 
-            return runWordle(interaction, {
-                ...(guess === null ? {} : { guess }),
-                puzzleProvider,
-                store,
-            });
+            if (
+                !enableTestCommands &&
+                (subcommand === WORDLE_REFRESH_TEST_SUBCOMMAND_NAME ||
+                    subcommand === WORDLE_YESTERDAY_RECORD_TEST_SUBCOMMAND_NAME)
+            ) {
+                throw new Error(`운영 환경에서 사용할 수 없는 Wordle 명령어입니다: ${subcommand}`);
+            }
+
+            switch (subcommand) {
+                case WORDLE_PLAY_SUBCOMMAND_NAME:
+                    return runWordle(interaction, { puzzleProvider, store });
+                case WORDLE_INPUT_SUBCOMMAND_NAME:
+                    return runWordle(interaction, {
+                        guess: interaction.options.getString(WORDLE_GUESS_OPTION_NAME, true),
+                        puzzleProvider,
+                        store,
+                    });
+                case WORDLE_SCOREBOARD_SUBCOMMAND_NAME:
+                    return runWordleScoreboard(interaction, store, puzzleProvider);
+                case WORDLE_RECORDS_SUBCOMMAND_NAME:
+                    return runWordleRecords(interaction, store);
+                case WORDLE_REFRESH_TEST_SUBCOMMAND_NAME:
+                    return runWordleRefreshTest(interaction, store, puzzleRefresher);
+                case WORDLE_YESTERDAY_RECORD_TEST_SUBCOMMAND_NAME:
+                    return runYesterdayWordleTest(interaction, store, puzzleProvider);
+                default:
+                    throw new Error(`지원하지 않는 Wordle 서브커맨드입니다: ${subcommand}`);
+            }
         },
     };
 }
 
-export const wordleCommand = createWordleCommand(defaultWordleSessionStore, wordlePuzzleCache);
+export function createDefaultWordleCommand(enableTestCommands = false): BotCommand {
+    return createWordleCommand(
+        defaultWordleSessionStore,
+        wordlePuzzleCache,
+        wordlePuzzleCache,
+        enableTestCommands,
+    );
+}
+
+export const wordleCommand = createDefaultWordleCommand();

@@ -1,17 +1,22 @@
-import type { Message } from "discord.js";
-import { describe, expect, it, vi } from "vitest";
+import type { Client, Message } from "discord.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Mock } from "vitest";
 
 import {
+    createWordleCommand,
+    createYesterdayWordleRecordResponse,
     handleWordleButton,
+    publishPendingYesterdayWordleRecords,
     sendPublicWordlePanel,
     updatePublicWordlePanel,
     WordleSessionStore,
 } from "../src/commands/wordle.js";
 import { createWordleGame, submitGuess } from "../src/features/wordle/game.js";
+import { WordlePuzzleCache } from "../src/features/wordle/puzzle-cache.js";
 import {
     createButtonInteraction,
     createCommandInteraction,
+    createPuzzleProvider,
     createSession,
     getCallArgument,
     getComponentJson,
@@ -23,6 +28,10 @@ import {
 
 const { guild: guildId } = WORDLE_TEST_IDS;
 const puzzle = WORDLE_TEST_PUZZLE;
+
+afterEach(() => {
+    vi.useRealTimers();
+});
 
 interface StatusPanelScenarioOptions {
     channelId: string;
@@ -211,24 +220,184 @@ describe("Wordle 개인 공개 패널 전송", () => {
             edit: vi.fn().mockRejectedValue({ code: "10008" }),
             name: "삭제된",
         },
-    ])("$name 기존 패널은 새 메시지로 교체합니다", async ({ edit, editable }) => {
-        const replacementMessage = { id: "replacement-message" } as Message;
-        const send = vi.fn().mockResolvedValue(replacementMessage);
-        const context = createCommandInteraction({ send });
-        const game = submitGuess(createWordleGame(puzzle), "crane");
-        const session = createSession({
-            game,
-            panelMessage: {
-                edit,
-                editable,
-            } as unknown as Message,
-        });
+    ])(
+        "$name 기존 패널은 새 메시지를 생성하지 않고 갱신을 중단합니다",
+        async ({ edit, editable }) => {
+            const send = vi.fn();
+            const context = createCommandInteraction({ send });
+            const game = submitGuess(createWordleGame(puzzle), "crane");
+            const session = createSession({
+                game,
+                panelMessage: {
+                    edit,
+                    editable,
+                } as unknown as Message,
+            });
 
-        await expect(updatePublicWordlePanel(context.interaction, session, game)).resolves.toBe(
-            replacementMessage,
+            await expect(
+                updatePublicWordlePanel(context.interaction, session, game),
+            ).resolves.toBeUndefined();
+
+            expect(edit).toHaveBeenCalledTimes(editable ? 1 : 0);
+            expect(send).not.toHaveBeenCalled();
+        },
+    );
+});
+
+const currentPuzzle = {
+    ...WORDLE_TEST_PUZZLE,
+    id: WORDLE_TEST_PUZZLE.id + 1,
+    printDate: "2026-07-24",
+    puzzleNumber: WORDLE_TEST_PUZZLE.puzzleNumber + 1,
+    solution: "slate",
+};
+
+function createStoreWithYesterdayRecord(): WordleSessionStore {
+    const store = new WordleSessionStore();
+    const game = submitGuess(createWordleGame(puzzle), "crane");
+
+    store.set(
+        WORDLE_TEST_IDS.user,
+        puzzle.printDate,
+        WORDLE_TEST_IDS.guild,
+        createSession({ game }),
+    );
+    store.registerGuildParticipant(
+        WORDLE_TEST_IDS.user,
+        puzzle.printDate,
+        WORDLE_TEST_IDS.guild,
+        WORDLE_TEST_IDS.channel,
+    );
+    store.activatePuzzle(currentPuzzle);
+
+    return store;
+}
+
+describe("어제 Wordle 기록판", () => {
+    it("어제 정답과 점수판 상태를 표시하되 입력 단어는 숨기고 참여자를 멘션합니다", () => {
+        const store = createStoreWithYesterdayRecord();
+        const response = createYesterdayWordleRecordResponse(
+            store,
+            WORDLE_TEST_IDS.guild,
+            puzzle.printDate,
+        );
+        const componentJson = JSON.stringify(response.components[0]?.toJSON());
+
+        expect(componentJson).toContain("어제의 Wordle 점수판");
+        expect(componentJson).toContain("정답 · `APPLE`");
+        expect(componentJson).toContain(`<@${WORDLE_TEST_IDS.user}> **진행 중** · **1/6**`);
+        expect(componentJson).toContain(
+            `wordle:status-view:${puzzle.printDate}:${WORDLE_TEST_IDS.user}`,
+        );
+        expect(componentJson).not.toContain("crane");
+        expect(response.allowedMentions.users).toEqual([WORDLE_TEST_IDS.user]);
+        expect(response.flags).toBe(32_768);
+
+        store.close();
+    });
+
+    it("퍼즐 갱신 후 서버별 기록판을 한 번만 전송하고 완료 상태를 저장합니다", async () => {
+        const store = createStoreWithYesterdayRecord();
+        const send = vi.fn().mockResolvedValue({ id: WORDLE_TEST_IDS.message });
+        const fetch = vi.fn().mockResolvedValue({
+            guildId: WORDLE_TEST_IDS.guild,
+            isSendable: () => true,
+            send,
+        });
+        const client = {
+            channels: { fetch },
+        } as unknown as Client;
+
+        await expect(
+            publishPendingYesterdayWordleRecords(client, currentPuzzle.printDate, store),
+        ).resolves.toBe(1);
+        await expect(
+            publishPendingYesterdayWordleRecords(client, currentPuzzle.printDate, store),
+        ).resolves.toBe(0);
+
+        expect(fetch).toHaveBeenCalledOnce();
+        expect(fetch).toHaveBeenCalledWith(WORDLE_TEST_IDS.channel);
+        expect(send).toHaveBeenCalledOnce();
+        expect(store.listPendingYesterdayAnnouncements(currentPuzzle.printDate)).toEqual([]);
+
+        store.close();
+    });
+
+    it("/워들 어제기록_test는 현재 채널에 어제 기록판을 출력합니다", async () => {
+        const store = createStoreWithYesterdayRecord();
+        const context = createCommandInteraction({ subcommand: "어제기록_test" });
+        const command = createWordleCommand(
+            store,
+            createPuzzleProvider(currentPuzzle),
+            undefined,
+            true,
         );
 
-        expect(edit).toHaveBeenCalledTimes(editable ? 1 : 0);
-        expect(send).toHaveBeenCalledOnce();
+        await command.execute(context.interaction);
+
+        const response = getCallArgument<{
+            allowedMentions: { users: string[] };
+            components: { toJSON(): unknown }[];
+            flags: number;
+        }>(context.reply);
+        expect(JSON.stringify(response.components[0]?.toJSON())).toContain("어제의 Wordle 점수판");
+        expect(response.allowedMentions.users).toEqual([WORDLE_TEST_IDS.user]);
+        expect(response.flags).toBe(32_768);
+
+        store.close();
+    });
+
+    it("/워들 갱신_test는 자정과 동일한 퍼즐 전환 경로로 어제 기록판을 전송합니다", async () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date("2026-07-23T15:30:00.000Z"));
+
+        const store = createStoreWithYesterdayRecord();
+        const target = store.listPendingYesterdayAnnouncements(currentPuzzle.printDate)[0];
+
+        if (target === undefined) {
+            throw new Error("날짜 전환 테스트에 사용할 어제 Wordle 기록판 대상이 없습니다.");
+        }
+
+        store.markYesterdayAnnouncementSent(target, WORDLE_TEST_IDS.message);
+
+        const send = vi.fn().mockResolvedValue({ id: "62345678901234567" });
+        const fetchChannel = vi.fn().mockResolvedValue({
+            guildId: WORDLE_TEST_IDS.guild,
+            isSendable: () => true,
+            send,
+        });
+        const context = createCommandInteraction({
+            fetchChannel,
+            subcommand: "갱신_test",
+        });
+        const getPuzzle = vi.fn().mockResolvedValue(currentPuzzle);
+        const cache = new WordlePuzzleCache({ getPuzzle });
+
+        await cache.refresh();
+
+        const removeRefreshListener = cache.addRefreshListener(async (refreshedPuzzle) => {
+            store.activatePuzzle(refreshedPuzzle);
+            await publishPendingYesterdayWordleRecords(
+                context.interaction.client,
+                refreshedPuzzle.printDate,
+                store,
+            );
+        });
+
+        try {
+            await createWordleCommand(store, cache, cache, true).execute(context.interaction);
+
+            expect(getPuzzle).toHaveBeenCalledTimes(2);
+            expect(fetchChannel).toHaveBeenCalledWith(WORDLE_TEST_IDS.channel);
+            expect(send).toHaveBeenCalledOnce();
+            expect(getCallArgument<{ content: string }>(context.editReply).content).toContain(
+                "자정과 동일한 Wordle 날짜 전환 및 어제 기록판 전송 처리를 완료했습니다.",
+            );
+            expect(store.listPendingYesterdayAnnouncements(currentPuzzle.printDate)).toEqual([]);
+            expect(cache.getTodaysPuzzle()).toEqual(currentPuzzle);
+        } finally {
+            removeRefreshListener();
+            store.close();
+        }
     });
 });

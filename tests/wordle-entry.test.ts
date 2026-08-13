@@ -27,7 +27,7 @@ const { guild: guildId } = WORDLE_TEST_IDS;
 const puzzle = WORDLE_TEST_PUZZLE;
 
 describe("Wordle 실행 진입점", () => {
-    it("/워들은 공개 메시지 없이 비공개 게임 화면과 서버 참여 상태를 생성합니다", async () => {
+    it("/워들 플레이는 공개 메시지 없이 비공개 게임 화면과 서버 참여 상태를 생성합니다", async () => {
         const userId = "32345678901234567";
         const store = new WordleSessionStore();
         const puzzleProvider = createPuzzleProvider();
@@ -44,8 +44,8 @@ describe("Wordle 실행 진입점", () => {
         expect(getCallArgument<{ flags: number }>(context.editReply).flags).toBe(32_768);
         expect(getComponentJson(context.editReply)).toContain("### 나의 Wordle #1860");
         expect(getComponentJson(context.editReply)).toContain("단어 입력");
-        expect(getComponentJson(context.editReply)).toContain("현재 진행 공유");
-        expect(getComponentJson(context.editReply)).toContain("공개 현황 보기");
+        expect(getComponentJson(context.editReply)).toContain("현황 공유");
+        expect(getComponentJson(context.editReply)).toContain("점수판");
     });
 
     it("버튼도 공용 진입점에서 같은 비공개 화면과 서버 참여 상태를 생성합니다", async () => {
@@ -67,11 +67,12 @@ describe("Wordle 실행 진입점", () => {
         expect(getComponentJson(context.editReply)).toContain("단어 입력");
     });
 
-    it("/워들의 단어 옵션은 모달 없이 정규화한 추측을 제출합니다", async () => {
+    it("/워들 입력은 모달 없이 정규화한 추측을 제출합니다", async () => {
         const store = new WordleSessionStore();
         const context = createCommandInteraction({
             guess: "CRANE",
             guildId: "93345678901234567",
+            subcommand: "입력",
             userId: "92345678901234567",
         });
         const dictionaryRequest = vi
@@ -89,7 +90,7 @@ describe("Wordle 실행 진입점", () => {
         }
     });
 
-    it("/워들만 실행해도 기존 공개 현황 패널에 0/6 참여 상태를 반영합니다", async () => {
+    it("/워들 플레이만 실행해도 기존 공개 현황 패널에 0/6 참여 상태를 반영합니다", async () => {
         const userId = "34345678901234567";
         const channelId = "44345678901234567";
         const statusMessageId = "54345678901234567";
@@ -98,6 +99,7 @@ describe("Wordle 실행 진입점", () => {
         const store = new WordleSessionStore();
         const context = createCommandInteraction({ channelId, fetchMessage, userId });
 
+        store.activatePuzzle(puzzle);
         store.setPublicStatusPanel({
             channelId,
             guildId,
@@ -127,6 +129,200 @@ describe("Wordle 실행 진입점", () => {
         expect(getComponentJson(context.editReply)).toContain(
             "오늘의 Wordle이 아직 준비되지 않았습니다.",
         );
+    });
+
+    it("/워들 점수판은 오늘의 공개 점수판과 이동 링크를 표시합니다", async () => {
+        const messageId = "62345678901234567";
+        const send = vi.fn().mockResolvedValue({ id: messageId });
+        const store = new WordleSessionStore();
+        const context = createCommandInteraction({ send, subcommand: "점수판" });
+
+        await createWordleCommand(store, createPuzzleProvider()).execute(context.interaction);
+
+        expect(context.deferReply).toHaveBeenCalledWith({ flags: 64 });
+        expect(getComponentJson(send)).toContain("### 오늘의 Wordle 점수판");
+        expect(getComponentJson(send)).toContain("아직 Wordle에 참여한 사용자가 없습니다.");
+        expect(getComponentJson(context.editReply)).toContain(
+            `https://discord.com/channels/${guildId}/${WORDLE_TEST_IDS.channel}/${messageId}`,
+        );
+    });
+
+    it("/워들 기록은 사용자를 지정하면 해당 사용자의 빈 개인 기록을 표시합니다", async () => {
+        const context = createCommandInteraction({
+            recordUserId: WORDLE_TEST_IDS.user,
+            subcommand: "기록",
+        });
+
+        await createWordleCommand(new WordleSessionStore(), createPuzzleProvider()).execute(
+            context.interaction,
+        );
+
+        expect(context.getUser).toHaveBeenCalledWith("사용자");
+        const response = getCallArgument<{ flags: number }>(context.reply);
+
+        expect(response.flags).toBe(32_768);
+        expect(getComponentJson(context.reply)).toContain(
+            `### <@${WORDLE_TEST_IDS.user}>님의 Wordle 개인 기록`,
+        );
+    });
+
+    it("/워들 기록은 선택한 사용자의 기록을 표시합니다", async () => {
+        const context = createCommandInteraction({
+            recordUserId: WORDLE_TEST_IDS.otherUser,
+            subcommand: "기록",
+        });
+
+        await createWordleCommand(new WordleSessionStore(), createPuzzleProvider()).execute(
+            context.interaction,
+        );
+
+        expect(getComponentJson(context.reply)).toContain(
+            `### <@${WORDLE_TEST_IDS.otherUser}>님의 Wordle 개인 기록`,
+        );
+    });
+
+    it("/워들 기록은 선택한 사용자의 저장 기록을 형식에 맞게 표시합니다", async () => {
+        const store = new WordleSessionStore();
+        const gameContext = createCommandInteraction();
+
+        await runWordle(gameContext.interaction, {
+            dictionary: createDictionary(),
+            guess: "apple",
+            puzzleProvider: createPuzzleProvider(),
+            store,
+        });
+        store.recordSpoilerUse(WORDLE_TEST_IDS.user, "genuine");
+        store.recordSpoilerUse(WORDLE_TEST_IDS.user, "fake");
+        store.recordUnregisteredWord(WORDLE_TEST_IDS.user);
+
+        const recordContext = createCommandInteraction({
+            recordUserId: WORDLE_TEST_IDS.user,
+            subcommand: "기록",
+        });
+        await createWordleCommand(store, createPuzzleProvider()).execute(recordContext.interaction);
+
+        const panelJson = getComponentJson(recordContext.reply);
+
+        expect(panelJson).toContain("성공 횟수: **1회**");
+        expect(panelJson).toContain("찐스포: **1회**");
+        expect(panelJson).toContain("사전 미등록 단어 입력 횟수: **1회**");
+    });
+
+    it("/워들 기록은 사용자를 생략하고 기록 보유자가 없으면 빈 서버 순위를 표시합니다", async () => {
+        const context = createCommandInteraction({ subcommand: "기록" });
+
+        await createWordleCommand(new WordleSessionStore(), createPuzzleProvider()).execute(
+            context.interaction,
+        );
+
+        expect(context.getUser).toHaveBeenCalledWith("사용자");
+        expect(context.deferReply).toHaveBeenCalledWith();
+        expect(context.fetchGuildMember).not.toHaveBeenCalled();
+        expect(context.reply).not.toHaveBeenCalled();
+        expect(getComponentJson(context.editReply)).toContain("현재 서버 Wordle 기록 순위");
+        expect(getComponentJson(context.editReply).match(/기록 없음/g)).toHaveLength(3);
+    });
+
+    it("/워들 기록은 사용자를 생략하면 현재 서버 구성원인 기록 보유자만 표시합니다", async () => {
+        const currentUserId = WORDLE_TEST_IDS.user;
+        const otherCurrentUserId = WORDLE_TEST_IDS.otherUser;
+        const departedUserId = "14345678901234567";
+        const botUserId = "15345678901234567";
+        const store = new WordleSessionStore();
+
+        for (const rankedUserId of [currentUserId, otherCurrentUserId, departedUserId, botUserId]) {
+            store.recordValidGuess(
+                rankedUserId,
+                puzzle.printDate,
+                guildId,
+                WORDLE_TEST_IDS.channel,
+                {
+                    game: submitGuess(createWordleGame(puzzle), "apple"),
+                    panelMessage: undefined,
+                    privateResponseInteraction: undefined,
+                    privateResponseMessageId: undefined,
+                },
+            );
+        }
+
+        const fetchGuildMember = vi.fn((memberId: string) => {
+            if (memberId === departedUserId) {
+                return Promise.reject(Object.assign(new Error("Unknown Member"), { code: 10_007 }));
+            }
+
+            return Promise.resolve({ user: { bot: memberId === botUserId } });
+        });
+        const context = createCommandInteraction({ fetchGuildMember, subcommand: "기록" });
+
+        await createWordleCommand(store, createPuzzleProvider()).execute(context.interaction);
+
+        const panelJson = getComponentJson(context.editReply);
+
+        expect(fetchGuildMember).toHaveBeenCalledTimes(4);
+        expect(panelJson).toContain(`<@${currentUserId}>`);
+        expect(panelJson).toContain(`<@${otherCurrentUserId}>`);
+        expect(panelJson).not.toContain(`<@${departedUserId}>`);
+        expect(panelJson).not.toContain(`<@${botUserId}>`);
+    });
+
+    it("/워들 기록은 현재 채널의 기존 전체 기록 메시지를 삭제하고 새 메시지를 저장합니다", async () => {
+        const previousMessageId = "44345678901234567";
+        const deletePreviousMessage = vi.fn().mockResolvedValue(undefined);
+        const fetchPreviousMessage = vi.fn().mockResolvedValue({
+            delete: deletePreviousMessage,
+        });
+        const store = new WordleSessionStore();
+
+        store.setServerRecordPanel({
+            channelId: WORDLE_TEST_IDS.channel,
+            guildId,
+            messageId: previousMessageId,
+        });
+        const context = createCommandInteraction({
+            fetchMessage: fetchPreviousMessage,
+            subcommand: "기록",
+        });
+
+        await createWordleCommand(store, createPuzzleProvider()).execute(context.interaction);
+
+        expect(fetchPreviousMessage).toHaveBeenCalledWith({
+            force: true,
+            message: previousMessageId,
+        });
+        expect(deletePreviousMessage).toHaveBeenCalledOnce();
+        expect(store.getServerRecordPanel(guildId, WORDLE_TEST_IDS.channel)).toEqual({
+            channelId: WORDLE_TEST_IDS.channel,
+            guildId,
+            messageId: "private-message",
+        });
+    });
+
+    it("/워들 기록은 다른 채널의 전체 기록 메시지를 유지합니다", async () => {
+        const otherChannelId = "34345678901234567";
+        const otherMessageId = "44345678901234567";
+        const store = new WordleSessionStore();
+
+        store.setServerRecordPanel({
+            channelId: otherChannelId,
+            guildId,
+            messageId: otherMessageId,
+        });
+        const context = createCommandInteraction({ subcommand: "기록" });
+
+        await createWordleCommand(store, createPuzzleProvider()).execute(context.interaction);
+
+        expect(context.fetchChannel).not.toHaveBeenCalled();
+        expect(context.fetchMessage).not.toHaveBeenCalled();
+        expect(store.getServerRecordPanel(guildId, otherChannelId)).toEqual({
+            channelId: otherChannelId,
+            guildId,
+            messageId: otherMessageId,
+        });
+        expect(store.getServerRecordPanel(guildId, WORDLE_TEST_IDS.channel)).toEqual({
+            channelId: WORDLE_TEST_IDS.channel,
+            guildId,
+            messageId: "private-message",
+        });
     });
 });
 
@@ -207,7 +403,7 @@ describe("Wordle 서버 간 진행 상태", () => {
             userId,
         );
         seedSession(store, {}, userId, otherGuildId);
-        store.registerGuildParticipant(userId, puzzle.printDate, guildId);
+        store.registerGuildParticipant(userId, puzzle.printDate, guildId, statusChannelId);
         store.setPublicStatusPanel({
             channelId: statusChannelId,
             guildId,
