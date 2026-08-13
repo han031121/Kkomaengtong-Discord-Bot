@@ -97,7 +97,9 @@ export function createAllWordleRecordsContainer(
 ): ContainerBuilder {
     return new ContainerBuilder()
         .setAccentColor(Colors.Blurple)
-        .addTextDisplayComponents(new TextDisplayBuilder().setContent("### 현재 서버 Wordle 기록 순위"))
+        .addTextDisplayComponents(
+            new TextDisplayBuilder().setContent("### 현재 서버 Wordle 기록 순위"),
+        )
         .addSeparatorComponents(createSeparator())
         .addTextDisplayComponents(
             new TextDisplayBuilder().setContent(
@@ -116,7 +118,9 @@ export function createAllWordleRecordsContainer(
                 ].join("\n"),
             ),
         )
-        .addTextDisplayComponents(new TextDisplayBuilder().setContent(`-# 항목별 최대 5위까지 표기`));
+        .addTextDisplayComponents(
+            new TextDisplayBuilder().setContent(`-# 항목별 최대 5위까지 표기`),
+        );
 }
 
 function getStatusText(game: WordleGame): string {

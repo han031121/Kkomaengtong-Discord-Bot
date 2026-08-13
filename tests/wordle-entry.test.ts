@@ -147,8 +147,11 @@ describe("Wordle 실행 진입점", () => {
         );
     });
 
-    it("/워들 기록 개인은 사용자를 생략하면 실행자의 빈 기록을 표시합니다", async () => {
-        const context = createCommandInteraction({ subcommand: "개인" });
+    it("/워들 기록은 사용자를 지정하면 해당 사용자의 빈 개인 기록을 표시합니다", async () => {
+        const context = createCommandInteraction({
+            recordUserId: WORDLE_TEST_IDS.user,
+            subcommand: "기록",
+        });
 
         await createWordleCommand(new WordleSessionStore(), createPuzzleProvider()).execute(
             context.interaction,
@@ -163,10 +166,10 @@ describe("Wordle 실행 진입점", () => {
         );
     });
 
-    it("/워들 기록 개인은 선택한 사용자의 기록을 표시합니다", async () => {
+    it("/워들 기록은 선택한 사용자의 기록을 표시합니다", async () => {
         const context = createCommandInteraction({
             recordUserId: WORDLE_TEST_IDS.otherUser,
-            subcommand: "개인",
+            subcommand: "기록",
         });
 
         await createWordleCommand(new WordleSessionStore(), createPuzzleProvider()).execute(
@@ -178,7 +181,7 @@ describe("Wordle 실행 진입점", () => {
         );
     });
 
-    it("/워들 기록 개인은 저장된 게임·스포일러·사전 기록을 형식에 맞게 표시합니다", async () => {
+    it("/워들 기록은 선택한 사용자의 저장 기록을 형식에 맞게 표시합니다", async () => {
         const store = new WordleSessionStore();
         const gameContext = createCommandInteraction();
 
@@ -192,7 +195,10 @@ describe("Wordle 실행 진입점", () => {
         store.recordSpoilerUse(WORDLE_TEST_IDS.user, "fake");
         store.recordUnregisteredWord(WORDLE_TEST_IDS.user);
 
-        const recordContext = createCommandInteraction({ subcommand: "개인" });
+        const recordContext = createCommandInteraction({
+            recordUserId: WORDLE_TEST_IDS.user,
+            subcommand: "기록",
+        });
         await createWordleCommand(store, createPuzzleProvider()).execute(recordContext.interaction);
 
         const panelJson = getComponentJson(recordContext.reply);
@@ -202,14 +208,14 @@ describe("Wordle 실행 진입점", () => {
         expect(panelJson).toContain("사전 미등록 단어 입력 횟수: **1회**");
     });
 
-    it("/워들 기록 전체는 기록 보유자가 없으면 빈 서버 순위를 표시합니다", async () => {
-        const context = createCommandInteraction({ subcommand: "전체" });
+    it("/워들 기록은 사용자를 생략하고 기록 보유자가 없으면 빈 서버 순위를 표시합니다", async () => {
+        const context = createCommandInteraction({ subcommand: "기록" });
 
         await createWordleCommand(new WordleSessionStore(), createPuzzleProvider()).execute(
             context.interaction,
         );
 
-        expect(context.getUser).not.toHaveBeenCalled();
+        expect(context.getUser).toHaveBeenCalledWith("사용자");
         expect(context.deferReply).toHaveBeenCalledWith();
         expect(context.fetchGuildMember).not.toHaveBeenCalled();
         expect(context.reply).not.toHaveBeenCalled();
@@ -217,7 +223,7 @@ describe("Wordle 실행 진입점", () => {
         expect(getComponentJson(context.editReply).match(/기록 없음/g)).toHaveLength(3);
     });
 
-    it("/워들 기록 전체는 현재 서버 구성원인 기록 보유자만 순위에 표시합니다", async () => {
+    it("/워들 기록은 사용자를 생략하면 현재 서버 구성원인 기록 보유자만 표시합니다", async () => {
         const currentUserId = WORDLE_TEST_IDS.user;
         const otherCurrentUserId = WORDLE_TEST_IDS.otherUser;
         const departedUserId = "14345678901234567";
@@ -246,7 +252,7 @@ describe("Wordle 실행 진입점", () => {
 
             return Promise.resolve({ user: { bot: memberId === botUserId } });
         });
-        const context = createCommandInteraction({ fetchGuildMember, subcommand: "전체" });
+        const context = createCommandInteraction({ fetchGuildMember, subcommand: "기록" });
 
         await createWordleCommand(store, createPuzzleProvider()).execute(context.interaction);
 
@@ -259,7 +265,7 @@ describe("Wordle 실행 진입점", () => {
         expect(panelJson).not.toContain(`<@${botUserId}>`);
     });
 
-    it("/워들 기록 전체는 현재 채널의 기존 기록 메시지를 삭제하고 새 메시지를 저장합니다", async () => {
+    it("/워들 기록은 현재 채널의 기존 전체 기록 메시지를 삭제하고 새 메시지를 저장합니다", async () => {
         const previousMessageId = "44345678901234567";
         const deletePreviousMessage = vi.fn().mockResolvedValue(undefined);
         const fetchPreviousMessage = vi.fn().mockResolvedValue({
@@ -274,7 +280,7 @@ describe("Wordle 실행 진입점", () => {
         });
         const context = createCommandInteraction({
             fetchMessage: fetchPreviousMessage,
-            subcommand: "전체",
+            subcommand: "기록",
         });
 
         await createWordleCommand(store, createPuzzleProvider()).execute(context.interaction);
@@ -291,7 +297,7 @@ describe("Wordle 실행 진입점", () => {
         });
     });
 
-    it("/워들 기록 전체는 다른 채널의 기록 메시지를 유지합니다", async () => {
+    it("/워들 기록은 다른 채널의 전체 기록 메시지를 유지합니다", async () => {
         const otherChannelId = "34345678901234567";
         const otherMessageId = "44345678901234567";
         const store = new WordleSessionStore();
@@ -301,7 +307,7 @@ describe("Wordle 실행 진입점", () => {
             guildId,
             messageId: otherMessageId,
         });
-        const context = createCommandInteraction({ subcommand: "전체" });
+        const context = createCommandInteraction({ subcommand: "기록" });
 
         await createWordleCommand(store, createPuzzleProvider()).execute(context.interaction);
 

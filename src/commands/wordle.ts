@@ -1,9 +1,8 @@
 export {
     createDefaultWordleCommand,
     createWordleCommand,
-    runAllWordleRecords,
-    runPersonalWordleRecords,
     runWordle,
+    runWordleRecords,
     runWordleScoreboard,
     wordleCommand,
 } from "./wordle/command.js";

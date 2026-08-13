@@ -51,7 +51,7 @@ describe("슬래시 명령어 정의", () => {
         ]);
     });
 
-    it("메인 봇의 Wordle 명령어는 일반 기능 세 개와 기록 그룹만 사용합니다", () => {
+    it("메인 봇의 Wordle 명령어는 네 개의 일반 서브커맨드만 사용합니다", () => {
         const commandData = getCommand("워들", createCommands(false));
 
         expect(commandData.options?.map((option) => option.name)).toEqual([
@@ -96,28 +96,15 @@ describe("슬래시 명령어 정의", () => {
                 options: [],
             },
             {
-                type: ApplicationCommandOptionType.SubcommandGroup,
+                type: ApplicationCommandOptionType.Subcommand,
                 name: "기록",
-                description: "개인 Wordle 기록과 현재 서버의 랭킹을 표시합니다.",
+                description: "사용자 개인 기록 또는 현재 서버의 전체 랭킹을 표시합니다.",
                 options: [
                     {
-                        type: ApplicationCommandOptionType.Subcommand,
-                        name: "개인",
-                        description: "사용자의 Wordle 기록을 표시합니다.",
-                        options: [
-                            {
-                                type: ApplicationCommandOptionType.User,
-                                name: "사용자",
-                                description: "기록을 확인할 사용자입니다. 생략하면 본인입니다.",
-                                required: false,
-                            },
-                        ],
-                    },
-                    {
-                        type: ApplicationCommandOptionType.Subcommand,
-                        name: "전체",
-                        description: "현재 서버의 Wordle 랭킹을 표시합니다.",
-                        options: [],
+                        type: ApplicationCommandOptionType.User,
+                        name: "사용자",
+                        description: "개인 기록을 확인할 사용자입니다. 생략하면 서버 랭킹입니다.",
+                        required: false,
                     },
                 ],
             },

@@ -44,9 +44,7 @@ const WORDLE_GUESS_OPTION_NAME = "단어";
 const WORDLE_PLAY_SUBCOMMAND_NAME = "플레이";
 const WORDLE_INPUT_SUBCOMMAND_NAME = "입력";
 const WORDLE_SCOREBOARD_SUBCOMMAND_NAME = "점수판";
-const WORDLE_RECORDS_SUBCOMMAND_GROUP_NAME = "기록";
-const WORDLE_PERSONAL_RECORDS_SUBCOMMAND_NAME = "개인";
-const WORDLE_ALL_RECORDS_SUBCOMMAND_NAME = "전체";
+const WORDLE_RECORDS_SUBCOMMAND_NAME = "기록";
 const WORDLE_RECORDS_USER_OPTION_NAME = "사용자";
 const WORDLE_REFRESH_TEST_SUBCOMMAND_NAME = "갱신_test";
 const WORDLE_YESTERDAY_RECORD_TEST_SUBCOMMAND_NAME = "어제기록_test";
@@ -90,25 +88,17 @@ function createWordleCommandData(enableTestCommands: boolean) {
                 .setName(WORDLE_SCOREBOARD_SUBCOMMAND_NAME)
                 .setDescription("오늘의 Wordle 점수판을 표시합니다."),
         )
-        .addSubcommandGroup((group) =>
-            group
-                .setName(WORDLE_RECORDS_SUBCOMMAND_GROUP_NAME)
-                .setDescription("개인 Wordle 기록과 현재 서버의 랭킹을 표시합니다.")
-                .addSubcommand((subcommand) =>
-                    subcommand
-                        .setName(WORDLE_PERSONAL_RECORDS_SUBCOMMAND_NAME)
-                        .setDescription("사용자의 Wordle 기록을 표시합니다.")
-                        .addUserOption((option) =>
-                            option
-                                .setName(WORDLE_RECORDS_USER_OPTION_NAME)
-                                .setDescription("기록을 확인할 사용자입니다. 생략하면 본인입니다.")
-                                .setRequired(false),
-                        ),
-                )
-                .addSubcommand((subcommand) =>
-                    subcommand
-                        .setName(WORDLE_ALL_RECORDS_SUBCOMMAND_NAME)
-                        .setDescription("현재 서버의 Wordle 랭킹을 표시합니다."),
+        .addSubcommand((subcommand) =>
+            subcommand
+                .setName(WORDLE_RECORDS_SUBCOMMAND_NAME)
+                .setDescription("사용자 개인 기록 또는 현재 서버의 전체 랭킹을 표시합니다.")
+                .addUserOption((option) =>
+                    option
+                        .setName(WORDLE_RECORDS_USER_OPTION_NAME)
+                        .setDescription(
+                            "개인 기록을 확인할 사용자입니다. 생략하면 서버 랭킹입니다.",
+                        )
+                        .setRequired(false),
                 ),
         );
 
@@ -275,25 +265,23 @@ export async function runWordleScoreboard(
     }
 }
 
-export async function runPersonalWordleRecords(
+export async function runWordleRecords(
     interaction: ChatInputCommandInteraction,
     store: WordleSessionStore,
 ): Promise<void> {
     const selectedUser = interaction.options.getUser(WORDLE_RECORDS_USER_OPTION_NAME);
-    const targetUser = selectedUser ?? interaction.user;
-    const record = store.getPersonalRecord(targetUser.id);
 
-    await interaction.reply({
-        components: [createPersonalWordleRecordContainer(targetUser.id, record)],
-        flags: /*MessageFlags.Ephemeral |*/ MessageFlags.IsComponentsV2,
-        allowedMentions: SUPPRESSED_ALLOWED_MENTIONS,
-    });
-}
+    if (selectedUser !== null) {
+        const record = store.getPersonalRecord(selectedUser.id);
 
-export async function runAllWordleRecords(
-    interaction: ChatInputCommandInteraction,
-    store: WordleSessionStore,
-): Promise<void> {
+        await interaction.reply({
+            components: [createPersonalWordleRecordContainer(selectedUser.id, record)],
+            flags: /*MessageFlags.Ephemeral |*/ MessageFlags.IsComponentsV2,
+            allowedMentions: SUPPRESSED_ALLOWED_MENTIONS,
+        });
+        return;
+    }
+
     const guildId = getWordleGuildId(interaction);
     const guild = interaction.guild;
 
@@ -320,24 +308,6 @@ export function createWordleCommand(
         data: createWordleCommandData(enableTestCommands),
         execute: async (interaction) => {
             const subcommand = interaction.options.getSubcommand();
-            const subcommandGroup = interaction.options.getSubcommandGroup(false);
-
-            if (subcommandGroup === WORDLE_RECORDS_SUBCOMMAND_GROUP_NAME) {
-                switch (subcommand) {
-                    case WORDLE_PERSONAL_RECORDS_SUBCOMMAND_NAME:
-                        return runPersonalWordleRecords(interaction, store);
-                    case WORDLE_ALL_RECORDS_SUBCOMMAND_NAME:
-                        return runAllWordleRecords(interaction, store);
-                    default:
-                        throw new Error(
-                            `지원하지 않는 Wordle 기록 서브커맨드입니다: ${subcommand}`,
-                        );
-                }
-            }
-
-            if (subcommandGroup !== null) {
-                throw new Error(`지원하지 않는 Wordle 서브커맨드 그룹입니다: ${subcommandGroup}`);
-            }
 
             if (
                 !enableTestCommands &&
@@ -358,6 +328,8 @@ export function createWordleCommand(
                     });
                 case WORDLE_SCOREBOARD_SUBCOMMAND_NAME:
                     return runWordleScoreboard(interaction, store, puzzleProvider);
+                case WORDLE_RECORDS_SUBCOMMAND_NAME:
+                    return runWordleRecords(interaction, store);
                 case WORDLE_REFRESH_TEST_SUBCOMMAND_NAME:
                     return runWordleRefreshTest(interaction, store, puzzleRefresher);
                 case WORDLE_YESTERDAY_RECORD_TEST_SUBCOMMAND_NAME:

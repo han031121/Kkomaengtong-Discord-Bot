@@ -84,19 +84,12 @@ interface CommandInteractionOptions extends InteractionOptions {
     deferred?: boolean;
     guess?: string | null;
     recordUserId?: string;
-    subcommand?: "개인" | "갱신_test" | "어제기록_test" | "입력" | "점수판" | "전체" | "플레이";
-    subcommandGroup?: "기록" | null;
+    subcommand?: "갱신_test" | "기록" | "어제기록_test" | "입력" | "점수판" | "플레이";
 }
 
 export function createCommandInteraction(options: CommandInteractionOptions = {}) {
     let deferred = options.deferred ?? false;
     const subcommand = options.subcommand ?? "플레이";
-    const subcommandGroup =
-        options.subcommandGroup !== undefined
-            ? options.subcommandGroup
-            : subcommand === "개인" || subcommand === "전체"
-              ? "기록"
-              : null;
     const send = options.send ?? vi.fn();
     const fetchMessage = options.fetchMessage ?? vi.fn();
     const fetchChannel = options.fetchChannel ?? vi.fn();
@@ -138,7 +131,6 @@ export function createCommandInteraction(options: CommandInteractionOptions = {}
         guildId: options.guildId ?? WORDLE_TEST_IDS.guild,
         options: {
             getSubcommand: () => subcommand,
-            getSubcommandGroup: () => subcommandGroup,
             getString: () => options.guess ?? null,
             getUser,
         },
