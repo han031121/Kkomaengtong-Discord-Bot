@@ -9,6 +9,7 @@
         "dev": "tsx watch --env-file=.env.development src/index.ts",
         "build": "tsc",
         "start": "node --env-file=.env dist/index.js",
+        "reset:wordle-records": "node --env-file=.env dist/scripts/reset-wordle-records.js",
         "deploy:commands": "tsx --env-file=.env src/deploy-commands.ts",
         "deploy:commands:dev": "tsx --env-file=.env.development src/deploy-commands.ts",
         "lint": "eslint .",

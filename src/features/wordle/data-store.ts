@@ -54,6 +54,12 @@ export interface WordleServerRecordPanel {
     messageId: string;
 }
 
+export interface WordleRecordResetResult {
+    printDate: string;
+    reappliedParticipantCount: number;
+    reappliedResultCount: number;
+}
+
 export type WordleSpoilerType = "fake" | "genuine";
 
 type WordleDailyResult = "abandoned" | "lost" | "won";
@@ -348,6 +354,89 @@ export class WordleDataStore {
         getPreviousWordlePrintDate(currentPrintDate);
 
         return this.runTransaction(() => this.finalizePreviousGames(currentPrintDate));
+    }
+
+    public resetGameRecordsForDate(printDate: string): WordleRecordResetResult {
+        getPreviousWordlePrintDate(printDate);
+
+        const puzzle = this.database
+            .prepare("SELECT 1 FROM wordle_puzzles WHERE print_date = ?")
+            .get(printDate);
+
+        if (puzzle === undefined) {
+            throw new Error(
+                `초기화 후 다시 반영할 Wordle 퍼즐이 저장되어 있지 않습니다: ${printDate}`,
+            );
+        }
+
+        return this.runTransaction(() => {
+            this.database.exec(`
+                DELETE FROM wordle_guild_record_participants;
+                DELETE FROM wordle_user_daily_results;
+
+                UPDATE wordle_user_records
+                SET success_count = 0,
+                    played_count = 0,
+                    successful_guess_count_sum = 0,
+                    current_success_streak = 0,
+                    last_success_date = NULL,
+                    updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now');
+            `);
+
+            const participantInsertion = this.database
+                .prepare(
+                    `
+                        INSERT INTO wordle_guild_record_participants (
+                            guild_id,
+                            print_date,
+                            user_id,
+                            updated_at
+                        )
+                        SELECT guild_id, print_date, user_id, updated_at
+                        FROM wordle_guild_participants
+                        WHERE print_date = ?
+                    `,
+                )
+                .run(printDate);
+            const games = this.database
+                .prepare(
+                    `
+                        SELECT user_id, print_date, guesses_json, status
+                        FROM wordle_games
+                        WHERE print_date = ? AND status IN ('won', 'lost')
+                        ORDER BY user_id
+                    `,
+                )
+                .all(printDate) as unknown as PersistedCompletableGame[];
+            let reappliedResultCount = 0;
+
+            for (const game of games) {
+                const status = parseGameStatus(game.status);
+
+                if (status === "playing") {
+                    throw new Error(
+                        "완료된 Wordle 게임 조회 결과에 진행 중인 게임이 포함되었습니다.",
+                    );
+                }
+
+                if (
+                    this.saveDailyResult(
+                        game.user_id,
+                        game.print_date,
+                        status,
+                        parseGuesses(game.guesses_json).length,
+                    )
+                ) {
+                    reappliedResultCount += 1;
+                }
+            }
+
+            return {
+                printDate,
+                reappliedParticipantCount: Number(participantInsertion.changes),
+                reappliedResultCount,
+            };
+        });
     }
 
     public getPersonalRecord(userId: string): WordlePersonalRecord {
@@ -719,7 +808,6 @@ export class WordleDataStore {
         if (!this.tableExists("wordle_games")) {
             this.createCurrentSchema();
             this.backfillGuildDailyChannels();
-            this.backfillWordleRecords();
             return;
         }
 
@@ -731,13 +819,11 @@ export class WordleDataStore {
         if (!isLegacySchema) {
             this.createCurrentSchema();
             this.backfillGuildDailyChannels();
-            this.backfillWordleRecords();
             return;
         }
 
         this.migrateLegacySchema();
         this.backfillGuildDailyChannels();
-        this.backfillWordleRecords();
     }
 
     private createCurrentSchema(): void {
@@ -877,49 +963,6 @@ export class WordleDataStore {
 
             PRAGMA user_version = ${WORDLE_SCHEMA_VERSION};
         `);
-    }
-
-    private backfillWordleRecords(): void {
-        this.runTransaction(() => {
-            this.database.exec(`
-                INSERT INTO wordle_guild_record_participants (
-                    guild_id,
-                    print_date,
-                    user_id,
-                    updated_at
-                )
-                SELECT guild_id, print_date, user_id, updated_at
-                FROM wordle_guild_participants
-                WHERE true
-                ON CONFLICT (guild_id, print_date, user_id) DO NOTHING;
-            `);
-
-            const games = this.database
-                .prepare(
-                    `
-                        SELECT user_id, print_date, guesses_json, status
-                        FROM wordle_games
-                        WHERE status IN ('won', 'lost')
-                        ORDER BY print_date, user_id
-                    `,
-                )
-                .all() as unknown as PersistedCompletableGame[];
-
-            for (const game of games) {
-                const status = parseGameStatus(game.status);
-
-                if (status === "playing") {
-                    continue;
-                }
-
-                this.saveDailyResult(
-                    game.user_id,
-                    game.print_date,
-                    status,
-                    parseGuesses(game.guesses_json).length,
-                );
-            }
-        });
     }
 
     private backfillGuildDailyChannels(): void {
