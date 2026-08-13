@@ -17,7 +17,7 @@ import {
     wordleCommand,
 } from "../commands/wordle.js";
 import type { WordlePuzzleProvider, WordleSessionStore } from "../commands/wordle.js";
-import type { WordlePuzzleRefresher } from "../commands/wordle-refresh-test.js";
+import type { WordlePuzzleRefresher } from "../commands/wordle/wordle-refresh-test.js";
 import type { BotCommand } from "../types/command.js";
 
 export function createClient(

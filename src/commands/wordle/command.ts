@@ -9,9 +9,9 @@ import {
     wordlePuzzleCache,
 } from "../../features/wordle/puzzle-cache.js";
 import type { BotCommand } from "../../types/command.js";
-import { runWordleRefreshTest } from "../wordle-refresh-test.js";
-import type { WordlePuzzleRefresher } from "../wordle-refresh-test.js";
-import { runYesterdayWordleTest } from "../yesterday-wordle-test.js";
+import { runWordleRefreshTest } from "./wordle-refresh-test.js";
+import type { WordlePuzzleRefresher } from "./wordle-refresh-test.js";
+import { runYesterdayWordleTest } from "./yesterday-wordle-test.js";
 import {
     createCompletedResponse,
     createNoticeEditResponse,
@@ -27,11 +27,11 @@ import type { WordleInteraction } from "./interaction-builders.js";
 import { processWordleGuess } from "./guess-processing.js";
 import type { WordleDictionary } from "./guess-processing.js";
 import { createPersonalWordleRecordContainer } from "./panel.js";
-import { replaceWordleServerRecordPanel } from "./record-message.js";
 import {
     createWordleServerRecordRankings,
     filterCurrentGuildMemberRecords,
-} from "./record-rankings.js";
+    replaceWordleServerRecordPanel,
+} from "./records.js";
 import {
     accessWordlePublicStatusPanel,
     refreshWordlePublicStatusPanels,
@@ -293,7 +293,6 @@ export async function runPersonalWordleRecords(
 export async function runAllWordleRecords(
     interaction: ChatInputCommandInteraction,
     store: WordleSessionStore,
-    includeUnknownMemberRecords = false,
 ): Promise<void> {
     const guildId = getWordleGuildId(interaction);
     const guild = interaction.guild;
@@ -305,11 +304,7 @@ export async function runAllWordleRecords(
     await interaction.deferReply();
 
     const storedRecords = store.listGuildPersonalRecords(guildId);
-    const currentMemberRecords = await filterCurrentGuildMemberRecords(
-        guild,
-        storedRecords,
-        includeUnknownMemberRecords,
-    );
+    const currentMemberRecords = await filterCurrentGuildMemberRecords(guild, storedRecords);
     const rankings = createWordleServerRecordRankings(currentMemberRecords);
 
     await replaceWordleServerRecordPanel(interaction, store, rankings);
@@ -332,7 +327,7 @@ export function createWordleCommand(
                     case WORDLE_PERSONAL_RECORDS_SUBCOMMAND_NAME:
                         return runPersonalWordleRecords(interaction, store);
                     case WORDLE_ALL_RECORDS_SUBCOMMAND_NAME:
-                        return runAllWordleRecords(interaction, store, enableTestCommands);
+                        return runAllWordleRecords(interaction, store);
                     default:
                         throw new Error(
                             `지원하지 않는 Wordle 기록 서브커맨드입니다: ${subcommand}`,

@@ -1,11 +1,11 @@
 import { MessageFlags } from "discord.js";
 import type { ChatInputCommandInteraction } from "discord.js";
 
-import { getPreviousWordlePrintDate } from "../features/wordle/data-store.js";
-import type { WordlePuzzleProvider } from "./wordle/command.js";
-import { getWordleGuildId } from "./wordle/interaction-builders.js";
-import type { WordleSessionStore } from "./wordle/session-store.js";
-import { createYesterdayWordleRecordResponse } from "./wordle/yesterday-status.js";
+import { getPreviousWordlePrintDate } from "../../features/wordle/data-store.js";
+import type { WordlePuzzleProvider } from "./command.js";
+import { getWordleGuildId } from "./interaction-builders.js";
+import type { WordleSessionStore } from "./session-store.js";
+import { createYesterdayWordleRecordResponse } from "./yesterday-status.js";
 
 export async function runYesterdayWordleTest(
     interaction: ChatInputCommandInteraction,

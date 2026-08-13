@@ -16,7 +16,7 @@ import type {
     WordlePuzzle,
 } from "../../features/wordle/game.js";
 import type { WordlePersonalRecord } from "../../features/wordle/data-store.js";
-import type { WordleRecordRankingEntry, WordleServerRecordRankings } from "./record-rankings.js";
+import type { WordleRecordRankingEntry, WordleServerRecordRankings } from "./records.js";
 
 const TILE_EMOJI: Readonly<Record<TileState, string>> = {
     absent: "⬛",

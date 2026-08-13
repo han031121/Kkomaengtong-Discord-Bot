@@ -12,7 +12,7 @@ import type { WordleGuildPersonalRecord } from "../src/commands/wordle/session-s
 import {
     createWordleServerRecordRankings,
     filterCurrentGuildMemberRecords,
-} from "../src/commands/wordle/record-rankings.js";
+} from "../src/commands/wordle/records.js";
 import {
     createAllWordleRecordsContainer,
     createPersonalWordleRecordContainer,
@@ -162,7 +162,7 @@ describe("Wordle 개인 기록 패널", () => {
 
         expect(containerJson).toContain("### <@12345678901234567>님의 Wordle 개인 기록");
         expect(containerJson).toContain("성공 횟수: **0회**");
-        expect(containerJson).toContain("최근 연속 성공: **0일**");
+        expect(containerJson).toContain("연속 성공: **0일**");
         expect(containerJson).toContain("정답률: **기록 없음**");
         expect(containerJson).toContain("평균 시도 횟수: **기록 없음**");
     });
@@ -182,7 +182,7 @@ describe("Wordle 개인 기록 패널", () => {
         );
 
         expect(containerJson).toContain("성공 횟수: **6회**");
-        expect(containerJson).toContain("최근 연속 성공: **2일**");
+        expect(containerJson).toContain("연속 성공: **2일**");
         expect(containerJson).toContain("정답률: **75.0%**");
         expect(containerJson).toContain("평균 시도 횟수: **2.3회**");
         expect(containerJson).toContain("  - 찐스포: **3회**");
@@ -214,7 +214,7 @@ describe("Wordle 전체 기록 순위 패널", () => {
         );
 
         expect(containerJson).toContain("### 현재 서버 Wordle 기록 순위");
-        expect(containerJson).toContain("기록 보유자 2명 · 항목별 최대 5위");
+        expect(containerJson).toContain("항목별 최대 5위까지 표기");
         expect(containerJson).toContain("1. <@13345678901234567> · **4일**");
         expect(containerJson).toContain("1. <@12345678901234567> · **75.0%**");
         expect(containerJson).toContain("1. <@12345678901234567> · **2.3회**");
@@ -291,26 +291,6 @@ describe("Wordle 서버 기록 순위", () => {
             records[0],
         ]);
         expect(fetch).toHaveBeenCalledTimes(3);
-    });
-
-    it("테스트 모드에서는 알 수 없는 사용자 기록을 유지합니다", async () => {
-        const currentRecord = createGuildPersonalRecord("1", 1, 100, 1);
-        const unknownRecord = createGuildPersonalRecord("2", 2, 100, 1);
-        const guild = {
-            members: {
-                fetch: vi.fn((userId: string) =>
-                    userId === unknownRecord.userId
-                        ? Promise.reject(
-                              Object.assign(new Error("Unknown Member"), { code: 10_007 }),
-                          )
-                        : Promise.resolve({ user: { bot: false } }),
-                ),
-            },
-        } as unknown as Guild;
-
-        await expect(
-            filterCurrentGuildMemberRecords(guild, [currentRecord, unknownRecord], true),
-        ).resolves.toEqual([currentRecord, unknownRecord]);
     });
 
     it("구성원 부재 이외의 Discord 조회 오류는 숨기지 않습니다", async () => {

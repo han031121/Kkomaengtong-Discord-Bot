@@ -214,7 +214,7 @@ describe("Wordle 실행 진입점", () => {
         expect(context.fetchGuildMember).not.toHaveBeenCalled();
         expect(context.reply).not.toHaveBeenCalled();
         expect(getComponentJson(context.editReply)).toContain("현재 서버 Wordle 기록 순위");
-        expect(getComponentJson(context.editReply)).toContain("기록 보유자 0명");
+        expect(getComponentJson(context.editReply).match(/기록 없음/g)).toHaveLength(3);
     });
 
     it("/워들 기록 전체는 현재 서버 구성원인 기록 보유자만 순위에 표시합니다", async () => {
@@ -253,7 +253,6 @@ describe("Wordle 실행 진입점", () => {
         const panelJson = getComponentJson(context.editReply);
 
         expect(fetchGuildMember).toHaveBeenCalledTimes(4);
-        expect(panelJson).toContain("기록 보유자 2명");
         expect(panelJson).toContain(`<@${currentUserId}>`);
         expect(panelJson).toContain(`<@${otherCurrentUserId}>`);
         expect(panelJson).not.toContain(`<@${departedUserId}>`);
@@ -318,37 +317,6 @@ describe("Wordle 실행 진입점", () => {
             guildId,
             messageId: "private-message",
         });
-    });
-
-    it("개발 테스트 모드의 /워들 기록 전체는 알 수 없는 임시 사용자를 표시합니다", async () => {
-        const temporaryUserId = "200000000000000001";
-        const store = new WordleSessionStore();
-
-        store.recordValidGuess(
-            temporaryUserId,
-            puzzle.printDate,
-            guildId,
-            WORDLE_TEST_IDS.channel,
-            {
-                game: submitGuess(createWordleGame(puzzle), "apple"),
-                panelMessage: undefined,
-                privateResponseInteraction: undefined,
-                privateResponseMessageId: undefined,
-            },
-        );
-
-        const fetchGuildMember = vi.fn().mockRejectedValue(
-            Object.assign(new Error("Unknown Member"), {
-                code: 10_007,
-            }),
-        );
-        const context = createCommandInteraction({ fetchGuildMember, subcommand: "전체" });
-
-        await createWordleCommand(store, createPuzzleProvider(), undefined, true).execute(
-            context.interaction,
-        );
-
-        expect(getComponentJson(context.editReply)).toContain(`<@${temporaryUserId}>`);
     });
 });
 

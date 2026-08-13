@@ -1,9 +1,9 @@
 import { MessageFlags } from "discord.js";
 import type { ChatInputCommandInteraction } from "discord.js";
 
-import { getPreviousWordlePrintDate } from "../features/wordle/data-store.js";
-import type { WordlePuzzle } from "../features/wordle/game.js";
-import type { WordleSessionStore } from "./wordle/session-store.js";
+import { getPreviousWordlePrintDate } from "../../features/wordle/data-store.js";
+import type { WordlePuzzle } from "../../features/wordle/game.js";
+import type { WordleSessionStore } from "./session-store.js";
 
 export interface WordlePuzzleRefresher {
     getTodaysPuzzle(now?: Date): WordlePuzzle;
