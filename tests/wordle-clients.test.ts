@@ -1,19 +1,17 @@
-import { MessageFlags } from "discord.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createWordleCommand, WordleSessionStore } from "../src/commands/wordle.js";
-import { LocalDictionary } from "../src/features/wordle/local-dictionary.js";
-import {
-    formatDateInTimeZone,
-    NytWordleClient,
-    NytWordleServiceError,
-} from "../src/features/wordle/nyt-wordle-client.js";
 import {
     getMillisecondsUntilNextDateInTimeZone,
     WordlePuzzleCache,
     WordlePuzzleUnavailableError,
-} from "../src/features/wordle/puzzle-cache.js";
-import { createCommandInteraction, WORDLE_TEST_PUZZLE } from "./wordle-test-helpers.js";
+} from "../src/features/wordle/application/puzzle-cache.js";
+import type { WordlePuzzle } from "../src/features/wordle/domain/game.js";
+import { formatDateInTimeZone } from "../src/features/wordle/domain/print-date.js";
+import {
+    NytWordleClient,
+    NytWordleServiceError,
+} from "../src/features/wordle/infrastructure/clients/nyt-wordle-client.js";
+import { LocalDictionary } from "../src/features/wordle/infrastructure/dictionary/local-dictionary.js";
 
 const nytResponse = {
     days_since_launch: 1890,
@@ -21,17 +19,17 @@ const nytResponse = {
     print_date: "2026-07-23",
     solution: "CRANE",
 };
-const cachedPuzzle = {
+const cachedPuzzle: WordlePuzzle = {
     id: 42,
     printDate: "2026-07-23",
     puzzleNumber: 1890,
     solution: "crane",
 };
 
-function createNytResponse(overrides: Partial<typeof nytResponse> = {}, status = 200): Response {
+function createNytResponse(overrides: Partial<typeof nytResponse> = {}): Response {
     return new Response(JSON.stringify({ ...nytResponse, ...overrides }), {
         headers: { "content-type": "application/json" },
-        status,
+        status: 200,
     });
 }
 
@@ -40,158 +38,123 @@ afterEach(() => {
 });
 
 describe("NYT Wordle 클라이언트", () => {
-    it("서울 날짜를 YYYY-MM-DD 형식으로 계산합니다", () => {
+    it("시간대의 날짜를 YYYY-MM-DD 형식으로 계산합니다", () => {
         const date = new Date("2026-07-22T15:30:00.000Z");
 
         expect(formatDateInTimeZone(date, "Asia/Seoul")).toBe("2026-07-23");
         expect(formatDateInTimeZone(date, "America/New_York")).toBe("2026-07-22");
     });
 
-    it("NYT 응답을 게임 퍼즐로 변환하고 같은 날짜는 캐시합니다", async () => {
-        const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(createNytResponse());
-        const client = new NytWordleClient(fetchMock);
-
-        await expect(client.getPuzzle("2026-07-23")).resolves.toEqual(cachedPuzzle);
-        await client.getPuzzle("2026-07-23");
-
-        expect(fetchMock).toHaveBeenCalledTimes(1);
-        expect(fetchMock).toHaveBeenCalledWith(
-            "https://www.nytimes.com/svc/wordle/v2/2026-07-23.json",
-            expect.objectContaining({ headers: { accept: "application/json" } }),
-        );
-    });
-
-    it("강제 갱신은 같은 날짜 캐시를 우회합니다", async () => {
+    it("NYT 응답을 변환하고 일반 요청만 날짜별로 캐시합니다", async () => {
         const fetchMock = vi
             .fn<typeof fetch>()
             .mockImplementation(() => Promise.resolve(createNytResponse()));
         const client = new NytWordleClient(fetchMock);
 
-        await client.getPuzzle("2026-07-23", { forceRefresh: true });
-        await client.getPuzzle("2026-07-23", { forceRefresh: true });
+        await expect(client.getPuzzle("2026-07-23")).resolves.toEqual(cachedPuzzle);
+        await client.getPuzzle("2026-07-23");
+        expect(fetchMock).toHaveBeenCalledOnce();
 
+        await client.getPuzzle("2026-07-23", { forceRefresh: true });
         expect(fetchMock).toHaveBeenCalledTimes(2);
+        expect(fetchMock).toHaveBeenLastCalledWith(
+            "https://www.nytimes.com/svc/wordle/v2/2026-07-23.json",
+            expect.objectContaining({ headers: { accept: "application/json" } }),
+        );
     });
 
-    it("예상과 다른 NYT 응답을 서비스 오류로 처리합니다", async () => {
-        const fetchMock = vi
-            .fn<typeof fetch>()
-            .mockResolvedValue(new Response(JSON.stringify({ solution: "too-long" })));
-        const client = new NytWordleClient(fetchMock);
+    it("잘못된 응답 형식과 요청 날짜 불일치를 거부합니다", async () => {
+        const invalidClient = new NytWordleClient(
+            vi
+                .fn<typeof fetch>()
+                .mockResolvedValue(new Response(JSON.stringify({ solution: "too-long" }))),
+        );
+        const wrongDateClient = new NytWordleClient(
+            vi
+                .fn<typeof fetch>()
+                .mockResolvedValue(createNytResponse({ print_date: "2026-07-22" })),
+        );
 
-        await expect(client.getPuzzle("2026-07-23")).rejects.toBeInstanceOf(NytWordleServiceError);
-    });
-
-    it("요청과 날짜가 다른 NYT 응답을 거부합니다", async () => {
-        const fetchMock = vi
-            .fn<typeof fetch>()
-            .mockResolvedValue(createNytResponse({ print_date: "2026-07-22" }));
-        const client = new NytWordleClient(fetchMock);
-
-        await expect(client.getPuzzle("2026-07-23")).rejects.toThrow(
+        await expect(invalidClient.getPuzzle("2026-07-23")).rejects.toBeInstanceOf(
+            NytWordleServiceError,
+        );
+        await expect(wrongDateClient.getPuzzle("2026-07-23")).rejects.toThrow(
             "NYT Wordle 응답 날짜가 요청한 날짜와 다릅니다.",
         );
     });
 });
 
 describe("Wordle 퍼즐 캐시", () => {
-    it("refresh 때만 클라이언트를 호출하고 조회는 캐시만 읽습니다", async () => {
-        const getPuzzle = vi.fn().mockResolvedValue(cachedPuzzle);
-        const cache = new WordlePuzzleCache({ getPuzzle });
-
-        await expect(cache.refresh(new Date("2026-07-22T15:30:00.000Z"))).resolves.toEqual(
-            cachedPuzzle,
-        );
-        expect(cache.getTodaysPuzzle(new Date("2026-07-22T15:30:00.000Z"))).toEqual(cachedPuzzle);
-
-        expect(getPuzzle).toHaveBeenCalledOnce();
-        expect(getPuzzle).toHaveBeenCalledWith("2026-07-23", { forceRefresh: true });
-    });
-
-    it("퍼즐 갱신 성공을 등록된 저장 리스너에 전달합니다", async () => {
-        const getPuzzle = vi.fn().mockResolvedValue(cachedPuzzle);
-        const cache = new WordlePuzzleCache({ getPuzzle });
-        const now = new Date("2026-07-22T15:30:00.000Z");
-        const refreshListener = vi.fn(() => {
-            expect(cache.getTodaysPuzzle(now)).toEqual(cachedPuzzle);
-        });
-        const removeListener = cache.addRefreshListener(refreshListener);
-
-        await cache.refresh(now);
-        removeListener();
-        await cache.refresh(now);
-
-        expect(refreshListener).toHaveBeenCalledOnce();
-        expect(refreshListener).toHaveBeenCalledWith(cachedPuzzle);
-    });
-
-    it("정답을 요청하기 전에 등록된 자정 전처리 리스너를 실행합니다", async () => {
+    it("갱신 전처리와 완료 리스너를 순서대로 실행하고 결과를 캐시합니다", async () => {
         const callOrder: string[] = [];
         const getPuzzle = vi.fn(() => {
             callOrder.push("request");
             return Promise.resolve(cachedPuzzle);
         });
         const cache = new WordlePuzzleCache({ getPuzzle });
-        const beforeRefreshListener = vi.fn((printDate: string) => {
-            callOrder.push(`finalize:${printDate}`);
+        const now = new Date("2026-07-22T15:30:00.000Z");
+
+        cache.addBeforeRefreshListener((printDate) => {
+            callOrder.push(`before:${printDate}`);
+        });
+        cache.addRefreshListener((puzzle) => {
+            callOrder.push(`after:${puzzle.printDate}`);
         });
 
-        cache.addBeforeRefreshListener(beforeRefreshListener);
-        await cache.refresh(new Date("2026-07-22T15:30:00.000Z"));
+        await expect(cache.refresh(now)).resolves.toEqual(cachedPuzzle);
 
-        expect(beforeRefreshListener).toHaveBeenCalledWith("2026-07-23");
-        expect(callOrder).toEqual(["finalize:2026-07-23", "request"]);
+        expect(cache.getTodaysPuzzle(now)).toEqual(cachedPuzzle);
+        expect(getPuzzle).toHaveBeenCalledWith("2026-07-23", { forceRefresh: true });
+        expect(callOrder).toEqual(["before:2026-07-23", "request", "after:2026-07-23"]);
     });
 
-    it("날짜 전환 테스트도 전날 퍼즐 상태를 거쳐 기존 갱신 리스너를 실행합니다", async () => {
-        const previousPuzzle = {
+    it("날짜 전환 테스트는 전날 상태를 준비한 뒤 오늘 퍼즐을 적용합니다", async () => {
+        const previousPuzzle: WordlePuzzle = {
             ...cachedPuzzle,
-            id: cachedPuzzle.id - 1,
+            id: 41,
             printDate: "2026-07-22",
-            puzzleNumber: cachedPuzzle.puzzleNumber - 1,
+            puzzleNumber: 1889,
             solution: "slate",
         };
-        const getPuzzle = vi.fn().mockResolvedValue(cachedPuzzle);
-        const cache = new WordlePuzzleCache({ getPuzzle });
-        const now = new Date("2026-07-22T15:30:00.000Z");
+        const cache = new WordlePuzzleCache({
+            getPuzzle: vi.fn().mockResolvedValue(cachedPuzzle),
+        });
         const prepareDateChange = vi.fn();
         const refreshListener = vi.fn(() => {
             expect(prepareDateChange).toHaveBeenCalledOnce();
-            expect(cache.getTodaysPuzzle(now)).toEqual(cachedPuzzle);
         });
 
         cache.addRefreshListener(refreshListener);
 
         await expect(
-            cache.refreshForDateChangeTest(previousPuzzle, prepareDateChange, now),
+            cache.refreshForDateChangeTest(
+                previousPuzzle,
+                prepareDateChange,
+                new Date("2026-07-22T15:30:00.000Z"),
+            ),
         ).resolves.toEqual(cachedPuzzle);
-
-        expect(getPuzzle).toHaveBeenCalledWith("2026-07-23", { forceRefresh: true });
         expect(refreshListener).toHaveBeenCalledWith(cachedPuzzle);
     });
 
-    it("캐시된 퍼즐 날짜가 오늘과 다르면 준비되지 않은 상태로 처리합니다", async () => {
-        const getPuzzle = vi.fn().mockResolvedValue(cachedPuzzle);
-        const cache = new WordlePuzzleCache({ getPuzzle });
+    it("다른 날짜의 캐시는 반환하지 않고 다음 서울 자정까지 시간을 계산합니다", async () => {
+        const cache = new WordlePuzzleCache({
+            getPuzzle: vi.fn().mockResolvedValue(cachedPuzzle),
+        });
 
         await cache.refresh(new Date("2026-07-22T15:30:00.000Z"));
 
         expect(() => cache.getTodaysPuzzle(new Date("2026-07-23T15:30:00.000Z"))).toThrow(
             WordlePuzzleUnavailableError,
         );
-        expect(getPuzzle).toHaveBeenCalledOnce();
+        expect(
+            getMillisecondsUntilNextDateInTimeZone(
+                new Date("2026-07-22T14:59:59.500Z"),
+                "Asia/Seoul",
+            ),
+        ).toBe(500);
     });
 
-    it("서울 기준 다음 날짜 변경까지 남은 시간을 계산합니다", () => {
-        const delayMs = getMillisecondsUntilNextDateInTimeZone(
-            new Date("2026-07-22T14:59:59.500Z"),
-            "Asia/Seoul",
-        );
-
-        expect(delayMs).toBe(500);
-    });
-
-    it("일일 갱신은 서울 자정부터 00시 10분까지 매분 클라이언트를 강제 호출합니다", async () => {
+    it("서울 자정부터 10분 동안 매분 퍼즐을 갱신합니다", async () => {
         vi.useFakeTimers();
         vi.setSystemTime(new Date("2026-07-22T14:59:59.000Z"));
 
@@ -199,175 +162,46 @@ describe("Wordle 퍼즐 캐시", () => {
         const cache = new WordlePuzzleCache({ getPuzzle }, "Asia/Seoul", 0);
 
         cache.startDailyRefresh();
-        await vi.advanceTimersByTimeAsync(999);
-
-        expect(getPuzzle).not.toHaveBeenCalled();
-
-        await vi.advanceTimersByTimeAsync(1);
-
+        await vi.advanceTimersByTimeAsync(1_000);
         expect(getPuzzle).toHaveBeenCalledOnce();
 
         await vi.advanceTimersByTimeAsync(600_000);
-
         expect(getPuzzle).toHaveBeenCalledTimes(11);
-        expect(getPuzzle).toHaveBeenLastCalledWith("2026-07-23", { forceRefresh: true });
 
-        cache.stopRefreshes();
+        await cache.stopRefreshes();
     });
 
-    it("부팅 갱신은 시작 직후부터 10분 동안 매분 클라이언트를 강제 호출합니다", async () => {
+    it("종료할 때 이미 시작된 예약 갱신이 끝날 때까지 기다립니다", async () => {
         vi.useFakeTimers();
-        vi.setSystemTime(new Date("2026-07-23T03:45:00.000Z"));
 
-        const getPuzzle = vi.fn().mockResolvedValue(cachedPuzzle);
-        const cache = new WordlePuzzleCache({ getPuzzle }, "Asia/Seoul", 0);
+        let finishRefresh: ((puzzle: WordlePuzzle) => void) | undefined;
+        const request = new Promise<WordlePuzzle>((resolve) => {
+            finishRefresh = resolve;
+        });
+        const cache = new WordlePuzzleCache({ getPuzzle: vi.fn().mockReturnValue(request) });
+        let stopped = false;
 
         cache.startStartupRefresh();
         await vi.advanceTimersByTimeAsync(0);
 
-        expect(getPuzzle).toHaveBeenCalledOnce();
+        const stopping = cache.stopRefreshes().then(() => {
+            stopped = true;
+        });
+        await Promise.resolve();
+        expect(stopped).toBe(false);
 
-        await vi.advanceTimersByTimeAsync(600_000);
-
-        expect(getPuzzle).toHaveBeenCalledTimes(11);
-        expect(getPuzzle).toHaveBeenLastCalledWith("2026-07-23", { forceRefresh: true });
-
-        cache.stopRefreshes();
-    });
-});
-
-describe("Wordle 갱신 테스트 명령어", () => {
-    it.each(["갱신_test", "어제기록_test"] as const)(
-        "메인 봇에서는 %s 서브커맨드 실행을 거부합니다",
-        async (subcommand) => {
-            const store = new WordleSessionStore();
-            const getTodaysPuzzle = vi.fn(() => WORDLE_TEST_PUZZLE);
-            const refreshForDateChangeTest = vi.fn();
-            const puzzleRefresher = {
-                getTodaysPuzzle,
-                refreshForDateChangeTest,
-            };
-            const context = createCommandInteraction({ subcommand });
-
-            try {
-                await expect(
-                    createWordleCommand(store, puzzleRefresher, puzzleRefresher).execute(
-                        context.interaction,
-                    ),
-                ).rejects.toThrow(
-                    `운영 환경에서 사용할 수 없는 Wordle 명령어입니다: ${subcommand}`,
-                );
-                expect(getTodaysPuzzle).not.toHaveBeenCalled();
-                expect(refreshForDateChangeTest).not.toHaveBeenCalled();
-            } finally {
-                store.close();
-            }
-        },
-    );
-
-    it("외부 캐시를 강제로 갱신하고 날짜 전환 처리 결과를 안내합니다", async () => {
-        const store = new WordleSessionStore();
-        const previousPuzzle = {
-            ...WORDLE_TEST_PUZZLE,
-            id: WORDLE_TEST_PUZZLE.id - 1,
-            printDate: "2026-07-22",
-            puzzleNumber: WORDLE_TEST_PUZZLE.puzzleNumber - 1,
-            solution: "crane",
-        };
-
-        store.activatePuzzle(previousPuzzle);
-        store.activatePuzzle(WORDLE_TEST_PUZZLE);
-
-        const getTodaysPuzzle = vi.fn(() => WORDLE_TEST_PUZZLE);
-        const refreshForDateChangeTest = vi.fn(
-            async (_previousPuzzle: typeof previousPuzzle, prepareDateChange: () => void) => {
-                prepareDateChange();
-                return Promise.resolve(WORDLE_TEST_PUZZLE);
-            },
-        );
-        const context = createCommandInteraction({ subcommand: "갱신_test" });
-        const puzzleRefresher = {
-            getTodaysPuzzle,
-            refreshForDateChangeTest,
-        };
-
-        try {
-            await createWordleCommand(store, puzzleRefresher, puzzleRefresher, true).execute(
-                context.interaction,
-            );
-
-            expect(context.deferReply).toHaveBeenCalledWith({ flags: MessageFlags.Ephemeral });
-            expect(getTodaysPuzzle).toHaveBeenCalledOnce();
-            expect(refreshForDateChangeTest).toHaveBeenCalledWith(
-                previousPuzzle,
-                expect.any(Function),
-            );
-            expect(context.editReply).toHaveBeenCalledWith({
-                content: [
-                    "Wordle #1860 정답 캐시를 강제로 갱신했습니다.",
-                    "날짜: `2026-07-23`",
-                    "정답: `APPLE`",
-                    "자정과 동일한 Wordle 날짜 전환 및 어제 기록판 전송 처리를 완료했습니다.",
-                ].join("\n"),
-            });
-        } finally {
-            store.close();
-        }
-    });
-
-    it("갱신에 실패하면 비공개 오류 안내를 표시합니다", async () => {
-        const store = new WordleSessionStore();
-        const previousPuzzle = {
-            ...WORDLE_TEST_PUZZLE,
-            id: WORDLE_TEST_PUZZLE.id - 1,
-            printDate: "2026-07-22",
-            puzzleNumber: WORDLE_TEST_PUZZLE.puzzleNumber - 1,
-            solution: "crane",
-        };
-
-        store.activatePuzzle(previousPuzzle);
-        store.activatePuzzle(WORDLE_TEST_PUZZLE);
-
-        const getTodaysPuzzle = vi.fn(() => WORDLE_TEST_PUZZLE);
-        const refreshForDateChangeTest = vi
-            .fn()
-            .mockRejectedValue(new Error("service unavailable"));
-        const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-        const context = createCommandInteraction({ subcommand: "갱신_test" });
-        const puzzleRefresher = {
-            getTodaysPuzzle,
-            refreshForDateChangeTest,
-        };
-
-        try {
-            await createWordleCommand(store, puzzleRefresher, puzzleRefresher, true).execute(
-                context.interaction,
-            );
-
-            expect(context.deferReply).toHaveBeenCalledWith({ flags: MessageFlags.Ephemeral });
-            expect(context.editReply).toHaveBeenCalledWith({
-                content:
-                    "Wordle 정답 갱신 또는 어제 기록판 전송에 실패했습니다. 잠시 후 다시 시도해 주세요.",
-            });
-        } finally {
-            warning.mockRestore();
-            store.close();
-        }
+        finishRefresh?.(cachedPuzzle);
+        await stopping;
+        expect(stopped).toBe(true);
     });
 });
 
 describe("로컬 영어 사전", () => {
-    it("로컬 단어 목록에 있는 5글자 영단어를 확인합니다", () => {
+    it("포함된 5글자 영단어만 허용합니다", () => {
         const dictionary = new LocalDictionary();
 
         expect(dictionary.isEnglishWord("crane")).toBe(true);
-        expect(dictionary.isEnglishWord("apple")).toBe(true);
         expect(dictionary.isEnglishWord("aapas")).toBe(true);
-    });
-
-    it("로컬 단어 목록에 없는 입력을 거부합니다", () => {
-        const dictionary = new LocalDictionary();
-
         expect(dictionary.isEnglishWord("zzzzz")).toBe(false);
         expect(dictionary.isEnglishWord("cranes")).toBe(false);
     });

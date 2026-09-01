@@ -124,15 +124,19 @@ TypeScript와 discord.js로 만든 간단한 Discord 슬래시 명령어 봇입�
 ├── assets/
 │   └── valid-five-letter-words.json # 로컬 검증용 5글자 영단어 데이터셋
 ├── src/
-│   ├── bot/create-client.ts   # Discord 클라이언트와 이벤트 처리
-│   ├── commands/test.ts       # 기능 선택 옵션과 다섯 테스트 기능
-│   ├── commands/wordle.ts     # Wordle 공개 API
-│   ├── commands/wordle/       # 명령어, 버튼, 모달, 공개 현황 및 UI 구성
-│   ├── features/wordle/       # 게임 규칙, 외부 API, 퍼즐 및 데이터 저장
-│   ├── config/env.ts          # 환경 변수 검증
-│   ├── types/command.ts       # 공통 명령어 타입
-│   ├── deploy-commands.ts     # Discord API 명령어 등록
-│   └── index.ts               # 애플리케이션 진입점
+│   ├── app/feature-registry.ts # 기능 등록 및 런타임 모듈 생성
+│   ├── bot/                    # 기능 독립적인 Discord 라우터와 모듈 계약
+│   ├── features/
+│   │   ├── test/               # 단일 파일 중심의 단순 커맨드 기능
+│   │   └── wordle/             # Wordle 기능과 내부 레이어
+│   │       ├── domain/         # 게임 규칙과 모델
+│   │       ├── application/    # 유스케이스와 포트
+│   │       ├── infrastructure/ # SQLite, NYT API, 로컬 사전
+│   │       └── presentation/   # 명령어, 버튼, 모달 및 화면
+│   ├── infrastructure/         # 여러 기능이 공유하는 기술 구현
+│   ├── config/env.ts           # 환경 변수 검증
+│   ├── deploy-commands.ts      # Discord API 명령어 등록
+│   └── index.ts                # 애플리케이션 실행 진입점
 ├── tests/                     # Vitest 테스트
 ├── .env.development.example   # 개발용 환경 변수 예시
 ├── .env.example               # 환경 변수 예시
@@ -141,7 +145,9 @@ TypeScript와 discord.js로 만든 간단한 Discord 슬래시 명령어 봇입�
 └── tsconfig.json              # TypeScript 컴파일 설정
 ```
 
-새 테스트 기능은 `src/commands/test.ts`의 명령어 옵션 선택지와 응답 생성 로직에 함께 추가합니다.
+세부 기능 모듈 계약, 새 커맨드 추가 방법과 계층 의존성 방향은 [`docs/architecture.md`](docs/architecture.md)에 정리되어 있습니다. ESLint가 공통 봇 코드의 기능 결합과 기능 내부 계층의 잘못된 import 방향을 검사합니다.
+
+새 테스트 기능은 `src/features/test/command.ts`의 명령어 옵션 선택지와 응답 생성 로직에 함께 추가합니다.
 
 Wordle 진행 상태는 사용자와 퍼즐 날짜별로 SQLite에 저장되므로 봇을 재시작해도 `/워들 플레이`, `/워들 입력` 명령이나 기존 버튼을 통해 이어서 진행할 수 있습니다. 퍼즐과 정답은 날짜별로 한 번만 저장하며, 새 퍼즐이 확인되면 당일과 바로 전날의 게임·참여·공개 현황 데이터만 남기고 더 오래된 기록은 함께 정리합니다. 새 퍼즐과 최근 2일 보존 처리가 끝나면 전날 참여 서버의 최근 Wordle 활동 채널에 어제 기록판을 자동 전송하며, 성공한 메시지 ID를 저장하여 같은 기록을 중복 전송하지 않습니다. 입력 활동 순번과 채널별 공개 게임 현황 메시지 ID도 저장되므로 재시작 후 현황 갱신을 이어갈 수 있습니다. 현재 상태 공유창과 비공개 응답 객체는 서버별 런타임 상태이므로 재시작 후 다시 생성될 수 있습니다. 비공개 응답은 Discord 상호작용 토큰이 유효한 동안에만 다른 서버에서 실시간으로 갱신할 수 있습니다. NYT 응답은 Discord 로그인 후 시작 직후 10분 동안, 그리고 서울 기준 00:00부터 00:10까지 1분마다 조회해 캐시되며, Wordle 명령 실행 중에는 외부 API를 다시 호출하지 않습니다. 입력 단어는 프로젝트에 포함된 JSON 영단어 데이터셋에서 즉시 검증합니다.
 

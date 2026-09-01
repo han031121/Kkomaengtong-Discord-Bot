@@ -1,10 +1,14 @@
 import { REST, Routes } from "discord.js";
 
-import { createCommands } from "./commands/index.js";
+import { collectCommandData, createFeatureRegistrations } from "./app/feature-registry.js";
 import { env } from "./config/env.js";
 
+const registrations = createFeatureRegistrations({
+    enableTestCommands: env.enableTestCommands,
+    wordleDatabasePath: env.wordleDatabasePath,
+});
+const commandData = collectCommandData(registrations).map((data) => data.toJSON());
 const rest = new REST().setToken(env.discordToken);
-const commandData = createCommands(env.enableTestCommands).map((command) => command.data.toJSON());
 const route =
     env.discordGuildId === undefined
         ? Routes.applicationCommands(env.discordClientId)

@@ -6,9 +6,16 @@ import type {
 import { vi } from "vitest";
 import type { Mock } from "vitest";
 
-import type { WordleSession, WordleSessionStore } from "../src/commands/wordle.js";
-import { createWordleGame, submitGuess } from "../src/features/wordle/game.js";
-import type { WordleGame, WordlePuzzle } from "../src/features/wordle/game.js";
+import { AsyncKeyedLock } from "../src/infrastructure/concurrency/async-keyed-lock.js";
+import { WordleSessionStore } from "../src/features/wordle/index.js";
+import type { WordleSession } from "../src/features/wordle/index.js";
+import type {
+    WordleDictionary,
+    WordlePuzzleProvider,
+} from "../src/features/wordle/application/ports.js";
+import { createWordleGame, submitGuess } from "../src/features/wordle/domain/game.js";
+import type { WordleGame, WordlePuzzle } from "../src/features/wordle/domain/game.js";
+import { WordleDataStore } from "../src/features/wordle/infrastructure/persistence/wordle-data-store.js";
 
 export const WORDLE_TEST_IDS = {
     channel: "32345678901234567",
@@ -26,9 +33,32 @@ export const WORDLE_TEST_PUZZLE: WordlePuzzle = {
     puzzleNumber: 1860,
 };
 
-export function createPuzzleProvider(puzzle: WordlePuzzle = WORDLE_TEST_PUZZLE) {
+export interface MockWordlePuzzleProvider extends WordlePuzzleProvider {
+    getTodaysPuzzle: Mock<() => WordlePuzzle>;
+}
+
+export function createPuzzleProvider(
+    puzzle: WordlePuzzle = WORDLE_TEST_PUZZLE,
+): MockWordlePuzzleProvider {
     return {
         getTodaysPuzzle: vi.fn(() => puzzle),
+    };
+}
+
+export function createWordleStore(): WordleSessionStore {
+    return new WordleSessionStore(new WordleDataStore());
+}
+
+export function createWordleDependencies(
+    store: WordleSessionStore = createWordleStore(),
+    puzzleProvider: WordlePuzzleProvider = createPuzzleProvider(),
+    dictionary: WordleDictionary = createDictionary(),
+) {
+    return {
+        dictionary,
+        puzzleProvider,
+        store,
+        userLock: new AsyncKeyedLock(),
     };
 }
 
@@ -55,8 +85,8 @@ export function createSession(overrides: Partial<WordleSession> = {}): WordleSes
 export function seedSession(
     store: WordleSessionStore,
     overrides: Partial<WordleSession> = {},
-    userId = WORDLE_TEST_IDS.user,
-    guildId = WORDLE_TEST_IDS.guild,
+    userId: string = WORDLE_TEST_IDS.user,
+    guildId: string = WORDLE_TEST_IDS.guild,
 ): WordleSession {
     const session = createSession(overrides);
 
@@ -293,7 +323,7 @@ export function getComponentJson(mock: Mock, callIndex = 0, componentIndex = 0):
 export function wordleButtonId(
     action:
         "input" | "play" | "progress-share" | "share" | "spoiler" | "status-panel" | "status-view",
-    userId = WORDLE_TEST_IDS.user,
+    userId: string = WORDLE_TEST_IDS.user,
 ): string {
     if (action === "play") {
         return "wordle:play";

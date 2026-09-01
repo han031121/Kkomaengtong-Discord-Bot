@@ -2,8 +2,8 @@ import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 
-import { WordleDataStore } from "../features/wordle/data-store.js";
-import { formatDateInTimeZone } from "../features/wordle/nyt-wordle-client.js";
+import { formatDateInTimeZone } from "../features/wordle/domain/print-date.js";
+import { WordleDataStore } from "../features/wordle/infrastructure/persistence/wordle-data-store.js";
 
 const WORDLE_TIME_ZONE = "Asia/Seoul";
 const DEFAULT_DATABASE_PATH = "data/wordle.sqlite";

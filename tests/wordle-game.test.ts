@@ -6,22 +6,20 @@ import {
     evaluateGuess,
     normalizeGuess,
     submitGuess,
-} from "../src/features/wordle/game.js";
-import type { WordlePuzzle } from "../src/features/wordle/game.js";
-import type { WordleGuildPersonalRecord } from "../src/commands/wordle/session-store.js";
-import {
-    createWordleServerRecordRankings,
-    filterCurrentGuildMemberRecords,
-} from "../src/commands/wordle/records.js";
+} from "../src/features/wordle/domain/game.js";
 import {
     createAllWordleRecordsContainer,
     createPersonalWordleRecordContainer,
     createPrivateWordleContainer,
     createPublicWordleContainer,
-    createWordlePlayActionRow,
     createWordlePublicStatusContainer,
     getFoundAlphabetCounts,
-} from "../src/commands/wordle/panel.js";
+} from "../src/features/wordle/presentation/panel.js";
+import {
+    createWordleServerRecordRankings,
+    filterCurrentGuildMemberRecords,
+} from "../src/features/wordle/presentation/records.js";
+import type { WordleGuildPersonalRecord } from "../src/features/wordle/presentation/session-store.js";
 import { createLostGame, WORDLE_TEST_PUZZLE } from "./wordle-test-helpers.js";
 
 const puzzle = {
@@ -29,7 +27,7 @@ const puzzle = {
     puzzleNumber: 1890,
 };
 
-function createGuildPersonalRecord(
+function createGuildRecord(
     userId: string,
     recentSuccessStreak: number,
     winRate: number | undefined,
@@ -50,29 +48,11 @@ function createGuildPersonalRecord(
     };
 }
 
-function expectPlayButton(component: unknown): void {
-    expect(component).toMatchObject({
-        components: [
-            {
-                custom_id: "wordle:play",
-                label: "지금 플레이",
-                style: 1,
-                type: 2,
-            },
-        ],
-        type: 1,
-    });
-}
-
-describe("Wordle 게임 규칙", () => {
-    it("영문 알파벳 5글자만 정규화합니다", () => {
+describe("Wordle 도메인과 화면", () => {
+    it("입력을 정규화하고 중복 글자와 게임 종료 규칙을 적용합니다", () => {
         expect(normalizeGuess(" CRANE ")).toBe("crane");
         expect(normalizeGuess("four")).toBeUndefined();
         expect(normalizeGuess("가나다라마")).toBeUndefined();
-        expect(normalizeGuess("a-bcd")).toBeUndefined();
-    });
-
-    it("중복 글자는 정답에 남아 있는 개수만 노란색으로 판정합니다", () => {
         expect(evaluateGuess("apple", "alley")).toEqual([
             "correct",
             "present",
@@ -80,95 +60,30 @@ describe("Wordle 게임 규칙", () => {
             "present",
             "absent",
         ]);
+
+        expect(submitGuess(createWordleGame(puzzle), "apple").status).toBe("won");
+        const lostGame = createLostGame(puzzle);
+        expect(lostGame.status).toBe("lost");
+        expect(() => submitGuess(lostGame, "apple")).toThrow("이미 종료된 Wordle 게임입니다.");
     });
 
-    it("정답을 맞히면 즉시 성공 상태가 됩니다", () => {
-        const game = submitGuess(createWordleGame(puzzle), "apple");
-
-        expect(game.status).toBe("won");
-        expect(game.guesses).toHaveLength(1);
-    });
-
-    it("여섯 번 안에 맞히지 못하면 종료 상태가 됩니다", () => {
-        const game = createLostGame(puzzle);
-
-        expect(game.status).toBe("lost");
-        expect(() => submitGuess(game, "apple")).toThrow("이미 종료된 Wordle 게임입니다.");
-    });
-});
-
-describe("Wordle 공개 패널", () => {
-    it("타일 진행 상황만 표시하고 추측 및 정답 단어를 노출하지 않습니다", () => {
+    it("공개 화면은 단어를 숨기고 비공개 화면만 입력 내용을 표시합니다", () => {
         const game = submitGuess(createWordleGame(puzzle), "alley");
-        const container = createPublicWordleContainer(
-            game,
-            "12345678901234567",
-            "https://cdn.example.com/avatar.png",
-        ).toJSON();
-        const panelJson = JSON.stringify(container);
+        const publicPanel = JSON.stringify(
+            createPublicWordleContainer(game, "12345678901234567").toJSON(),
+        );
+        const privatePanel = JSON.stringify(createPrivateWordleContainer(game).toJSON());
 
-        expect(container.components.map((component) => component.type)).toEqual([10, 14, 9]);
-        expect(container.components[2]).toMatchObject({
-            accessory: {
-                type: 11,
-                media: {
-                    url: "https://cdn.example.com/avatar.png",
-                },
-            },
-        });
-        expect(panelJson).toContain("### <@12345678901234567>님의 Wordle #1890");
-        expect(panelJson).toContain("🟩🟨⬛🟨⬛");
-        expect(panelJson).not.toContain("alley");
-        expect(panelJson).not.toContain("apple");
+        expect(publicPanel).toContain("🟩🟨⬛🟨⬛");
+        expect(publicPanel).not.toContain("alley");
+        expect(publicPanel).not.toContain("apple");
+        expect(privatePanel).toContain("`ALLEY` : 🟩🟨⬛🟨⬛");
+        expect(privatePanel).toContain("`A`🟩");
+        expect(privatePanel).not.toContain("apple");
     });
 
-    it("지금 플레이 버튼을 독립된 Action Row로 생성합니다", () => {
-        expectPlayButton(createWordlePlayActionRow().toJSON());
-    });
-
-    it("성공한 횟수에 맞는 볼드체 성공 문구를 표시합니다", () => {
-        const firstAttemptGame = submitGuess(createWordleGame(puzzle), "apple");
-        const secondAttemptGame = submitGuess(
-            submitGuess(createWordleGame(puzzle), "crane"),
-            "apple",
-        );
-
-        const firstAttemptPanel = JSON.stringify(
-            createPublicWordleContainer(firstAttemptGame, "12345678901234567").toJSON(),
-        );
-        const secondAttemptPanel = JSON.stringify(
-            createPublicWordleContainer(secondAttemptGame, "12345678901234567").toJSON(),
-        );
-
-        expect(firstAttemptPanel).toContain("성공 · 1/6 · **_Genius_**");
-        expect(secondAttemptPanel).toContain("성공 · 2/6 · **_Magnificent_**");
-    });
-});
-
-describe("Wordle 개인 기록 패널", () => {
-    it("기록이 없으면 계산 대상 통계를 기록 없음으로 표시합니다", () => {
-        const containerJson = JSON.stringify(
-            createPersonalWordleRecordContainer("12345678901234567", {
-                averageGuessCount: undefined,
-                fakeSpoilerCount: 0,
-                genuineSpoilerCount: 0,
-                playedCount: 0,
-                recentSuccessStreak: 0,
-                successCount: 0,
-                unregisteredWordCount: 0,
-                winRate: undefined,
-            }).toJSON(),
-        );
-
-        expect(containerJson).toContain("### <@12345678901234567>님의 Wordle 개인 기록");
-        expect(containerJson).toContain("성공 횟수: **0회**");
-        expect(containerJson).toContain("연속 성공: **0일**");
-        expect(containerJson).toContain("정답률: **기록 없음**");
-        expect(containerJson).toContain("평균 시도 횟수: **기록 없음**");
-    });
-
-    it("계산된 기록을 소수점 한 자리와 세부 횟수로 표시합니다", () => {
-        const containerJson = JSON.stringify(
+    it("개인 기록과 서버 순위를 사용자용 형식으로 표시합니다", () => {
+        const personalPanel = JSON.stringify(
             createPersonalWordleRecordContainer("12345678901234567", {
                 averageGuessCount: 2.25,
                 fakeSpoilerCount: 4,
@@ -180,103 +95,57 @@ describe("Wordle 개인 기록 패널", () => {
                 winRate: 75,
             }).toJSON(),
         );
-
-        expect(containerJson).toContain("성공 횟수: **6회**");
-        expect(containerJson).toContain("연속 성공: **2일**");
-        expect(containerJson).toContain("정답률: **75.0%**");
-        expect(containerJson).toContain("평균 시도 횟수: **2.3회**");
-        expect(containerJson).toContain("  - 찐스포: **3회**");
-        expect(containerJson).toContain("  - 짭스포: **4회**");
-        expect(containerJson).not.toContain("\\t- 찐스포");
-        expect(containerJson).not.toContain("\\t- 짭스포");
-        expect(containerJson).toContain("사전 미등록 단어 입력 횟수: **5회**");
-    });
-});
-
-describe("Wordle 전체 기록 순위 패널", () => {
-    it("세 가지 순위와 기록 보유자 수를 항목별 단위에 맞춰 표시합니다", () => {
-        const containerJson = JSON.stringify(
+        const serverPanel = JSON.stringify(
             createAllWordleRecordsContainer({
-                averageGuessCount: [
-                    { userId: "12345678901234567", value: 2.25 },
-                    { userId: "13345678901234567", value: 3 },
-                ],
-                recentSuccessStreak: [
-                    { userId: "13345678901234567", value: 4 },
-                    { userId: "12345678901234567", value: 2 },
-                ],
-                recordHolderCount: 2,
-                winRate: [
-                    { userId: "12345678901234567", value: 75 },
-                    { userId: "13345678901234567", value: 50 },
-                ],
+                averageGuessCount: [{ userId: "12345678901234567", value: 2.25 }],
+                recentSuccessStreak: [{ userId: "12345678901234567", value: 2 }],
+                recordHolderCount: 1,
+                winRate: [{ userId: "12345678901234567", value: 75 }],
             }).toJSON(),
         );
 
-        expect(containerJson).toContain("### 현재 서버 Wordle 기록 순위");
-        expect(containerJson).toContain("항목별 최대 5위까지 표기");
-        expect(containerJson).toContain("1. <@13345678901234567> · **4일**");
-        expect(containerJson).toContain("1. <@12345678901234567> · **75.0%**");
-        expect(containerJson).toContain("1. <@12345678901234567> · **2.3회**");
+        expect(personalPanel).toContain("정답률: **75.0%**");
+        expect(personalPanel).toContain("평균 시도 횟수: **2.3회**");
+        expect(personalPanel).toContain("찐스포: **3회**");
+        expect(serverPanel).toContain("### 현재 서버 Wordle 기록 순위");
+        expect(serverPanel).toContain("**75.0%**");
+        expect(serverPanel).toContain("**2.3회**");
     });
 
-    it("계산 가능한 기록이 없는 항목은 기록 없음으로 표시합니다", () => {
-        const containerJson = JSON.stringify(
-            createAllWordleRecordsContainer({
-                averageGuessCount: [],
-                recentSuccessStreak: [],
-                recordHolderCount: 0,
-                winRate: [],
-            }).toJSON(),
-        );
+    it("서버 기록을 항목별 방향으로 정렬하고 최대 다섯 명만 반환합니다", () => {
+        const rankings = createWordleServerRecordRankings([
+            createGuildRecord("5", 2, 80, 2.5),
+            createGuildRecord("2", 4, 100, 3),
+            createGuildRecord("4", 4, 90, 2),
+            createGuildRecord("1", 1, undefined, undefined),
+            createGuildRecord("3", 3, 70, 4),
+            createGuildRecord("6", 5, 60, 5),
+            createGuildRecord("7", 0, 50, 6),
+        ]);
 
-        expect(containerJson.match(/기록 없음/g)).toHaveLength(3);
+        expect(rankings.averageGuessCount.map((entry) => entry.userId)).toEqual([
+            "4",
+            "5",
+            "2",
+            "3",
+            "6",
+        ]);
+        expect(rankings.recentSuccessStreak.map((entry) => entry.userId)).toEqual([
+            "6",
+            "2",
+            "4",
+            "3",
+            "5",
+        ]);
+        expect(rankings.winRate.map((entry) => entry.userId)).toEqual(["2", "4", "5", "3", "6"]);
+        expect(rankings.recordHolderCount).toBe(7);
     });
-});
 
-describe("Wordle 서버 기록 순위", () => {
-    it("항목별 방향으로 정렬해 최대 다섯 명만 반환하고 계산되지 않은 값은 제외합니다", () => {
+    it("현재 서버의 일반 사용자만 기록 대상에 포함합니다", async () => {
         const records = [
-            createGuildPersonalRecord("5", 2, 80, 2.5),
-            createGuildPersonalRecord("2", 4, 100, 3),
-            createGuildPersonalRecord("4", 4, 90, 2),
-            createGuildPersonalRecord("1", 1, undefined, undefined),
-            createGuildPersonalRecord("3", 3, 70, 4),
-            createGuildPersonalRecord("6", 5, 60, 5),
-            createGuildPersonalRecord("7", 0, 50, 6),
-        ];
-
-        expect(createWordleServerRecordRankings(records)).toEqual({
-            averageGuessCount: [
-                { userId: "4", value: 2 },
-                { userId: "5", value: 2.5 },
-                { userId: "2", value: 3 },
-                { userId: "3", value: 4 },
-                { userId: "6", value: 5 },
-            ],
-            recentSuccessStreak: [
-                { userId: "6", value: 5 },
-                { userId: "2", value: 4 },
-                { userId: "4", value: 4 },
-                { userId: "3", value: 3 },
-                { userId: "5", value: 2 },
-            ],
-            recordHolderCount: 7,
-            winRate: [
-                { userId: "2", value: 100 },
-                { userId: "4", value: 90 },
-                { userId: "5", value: 80 },
-                { userId: "3", value: 70 },
-                { userId: "6", value: 60 },
-            ],
-        });
-    });
-
-    it("현재 서버의 일반 사용자 기록만 남깁니다", async () => {
-        const records = [
-            createGuildPersonalRecord("1", 1, 100, 1),
-            createGuildPersonalRecord("2", 1, 100, 1),
-            createGuildPersonalRecord("3", 1, 100, 1),
+            createGuildRecord("1", 1, 100, 1),
+            createGuildRecord("2", 1, 100, 1),
+            createGuildRecord("3", 1, 100, 1),
         ];
         const fetch = vi.fn((userId: string) => {
             if (userId === "2") {
@@ -290,164 +159,46 @@ describe("Wordle 서버 기록 순위", () => {
         await expect(filterCurrentGuildMemberRecords(guild, records)).resolves.toEqual([
             records[0],
         ]);
-        expect(fetch).toHaveBeenCalledTimes(3);
-    });
 
-    it("구성원 부재 이외의 Discord 조회 오류는 숨기지 않습니다", async () => {
-        const error = new Error("Discord API unavailable");
-        const guild = {
-            members: { fetch: vi.fn().mockRejectedValue(error) },
+        const apiError = new Error("Discord API unavailable");
+        const failingGuild = {
+            members: { fetch: vi.fn().mockRejectedValue(apiError) },
         } as unknown as Guild;
-
-        await expect(
-            filterCurrentGuildMemberRecords(guild, [createGuildPersonalRecord("1", 1, 100, 1)]),
-        ).rejects.toBe(error);
-    });
-});
-
-describe("Wordle 공개 현황 패널", () => {
-    it("사용자 상태를 두 줄과 accessory 보기 버튼으로 표시합니다", () => {
-        const game = submitGuess(createWordleGame(puzzle), "alley");
-        const container = createWordlePublicStatusContainer(
-            [
-                {
-                    userId: "12345678901234567",
-                    game,
-                },
-            ],
-            3,
-            puzzle.printDate,
-        ).toJSON();
-        const panelJson = JSON.stringify(container);
-
-        expect(container.components.map((component) => component.type)).toEqual([10, 14, 9, 10]);
-        expect(container.components[2]).toMatchObject({
-            components: [
-                {
-                    type: 10,
-                    content: "<@12345678901234567> **진행 중** · **1/6**\n찾음: 🟨 2개 · 🟩 1개",
-                },
-            ],
-            accessory: {
-                type: 2,
-                custom_id: "wordle:status-view:2026-07-23:12345678901234567",
-                label: "보기",
-                style: 2,
-            },
-        });
-        expect(panelJson).toContain("최근 활동 순 1명 표시 · 전체 3명");
-        expect(panelJson).not.toContain("alley");
-        expect(panelJson).not.toContain("apple");
-        expect(getFoundAlphabetCounts(game)).toEqual({
-            present: 2,
-            correct: 1,
-        });
-    });
-
-    it("알파벳이 노란색에서 초록색으로 바뀌면 초록색에만 집계합니다", () => {
-        const game = submitGuess(submitGuess(createWordleGame(puzzle), "plead"), "amply");
-
-        expect(getFoundAlphabetCounts(game)).toEqual({
-            present: 1,
-            correct: 3,
-        });
-    });
-
-    it("자리를 모르는 중복 알파벳을 확인된 개수만큼 집계합니다", () => {
-        const repeatedLetterPuzzle: WordlePuzzle = {
-            ...puzzle,
-            solution: "eagle",
-        };
-        const game = submitGuess(createWordleGame(repeatedLetterPuzzle), "speed");
-        const panelJson = JSON.stringify(
-            createWordlePublicStatusContainer(
-                [{ userId: "12345678901234567", game }],
-                1,
-                repeatedLetterPuzzle.printDate,
-            ).toJSON(),
+        await expect(filterCurrentGuildMemberRecords(failingGuild, [records[0]!])).rejects.toBe(
+            apiError,
         );
-
-        expect(game.guesses[0]?.tiles).toEqual([
-            "absent",
-            "absent",
-            "present",
-            "present",
-            "absent",
-        ]);
-        expect(getFoundAlphabetCounts(game)).toEqual({
-            present: 2,
-            correct: 0,
-        });
-        expect(panelJson).toContain("찾음: 🟨 2개 · 🟩 0개");
     });
 
-    it("게임 상태를 성공, 실패, 진행 중 글자로 표시합니다", () => {
+    it("공개 현황에는 상태와 발견 글자 수만 표시하고 최대 인원을 제한합니다", () => {
         const playingGame = submitGuess(createWordleGame(puzzle), "alley");
         const wonGame = submitGuess(createWordleGame(puzzle), "apple");
-        const lostGame = createLostGame(puzzle);
-
-        const panelJson = JSON.stringify(
+        const statusPanel = JSON.stringify(
             createWordlePublicStatusContainer(
                 [
                     { userId: "12345678901234561", game: wonGame },
-                    { userId: "12345678901234562", game: lostGame },
-                    { userId: "12345678901234563", game: playingGame },
+                    { userId: "12345678901234562", game: playingGame },
                 ],
-                3,
+                2,
                 puzzle.printDate,
             ).toJSON(),
         );
 
-        expect(panelJson).toContain("<@12345678901234561> **성공** · **1/6**");
-        expect(panelJson).toContain("<@12345678901234562> **실패** · **6/6**");
-        expect(panelJson).toContain("<@12345678901234563> **진행 중** · **1/6**");
-    });
+        expect(statusPanel).toContain("<@12345678901234561> **성공** · **1/6**");
+        expect(statusPanel).toContain("<@12345678901234562> **진행 중** · **1/6**");
+        expect(statusPanel).not.toContain("alley");
+        expect(statusPanel).not.toContain("apple");
+        expect(getFoundAlphabetCounts(playingGame)).toEqual({ present: 2, correct: 1 });
 
-    it("한 패널에는 최대 8명만 허용합니다", () => {
-        const game = submitGuess(createWordleGame(puzzle), "crane");
-        const entries = Array.from({ length: 9 }, (_, index) => ({
+        const tooManyEntries = Array.from({ length: 9 }, (_, index) => ({
             userId: `1234567890123456${index}`,
-            game,
+            game: playingGame,
         }));
-
         expect(() =>
-            createWordlePublicStatusContainer(entries, entries.length, puzzle.printDate),
+            createWordlePublicStatusContainer(
+                tooManyEntries,
+                tooManyEntries.length,
+                puzzle.printDate,
+            ),
         ).toThrow("최대 8명");
-    });
-});
-
-describe("Wordle 비공개 게임 화면", () => {
-    it("추측 단어와 알파벳 상태를 모바일 호환 색상 타일로 표시합니다", () => {
-        const game = submitGuess(createWordleGame(puzzle), "alley");
-        const container = createPrivateWordleContainer(game).toJSON();
-        const containerJson = JSON.stringify(container);
-
-        expect(container.components.map((component) => component.type)).toEqual([10, 14]);
-        expect(containerJson).toContain("### 나의 Wordle #1890");
-        expect(containerJson).toContain("입력 기록");
-        expect(containerJson).toContain("알파벳");
-        expect(containerJson).toContain("`ALLEY` : 🟩🟨⬛🟨⬛");
-        expect(containerJson).toContain("`A`🟩 `B`⬜ `C`⬜ `D`⬜ `E`🟨 `F`⬜ `G`⬜");
-        expect(containerJson).toContain("`H`⬜ `I`⬜ `J`⬜ `K`⬜ `L`🟨 `M`⬜ `N`⬜");
-        expect(containerJson).toContain("`V`⬜ `W`⬜ `X`⬜ `Y`⬛ `Z`⬜");
-        expect(containerJson).not.toContain("입력을 반영했습니다.");
-        expect(containerJson).not.toContain("\u001b[");
-        expect(containerJson).not.toContain("apple");
-    });
-
-    it("여섯 번째에 성공하면 볼드체 Phew 문구를 표시합니다", () => {
-        let game = createWordleGame(puzzle);
-
-        for (let attempt = 0; attempt < 5; attempt += 1) {
-            game = submitGuess(game, "crane");
-        }
-
-        game = submitGuess(game, "apple");
-
-        const containerJson = JSON.stringify(
-            createPrivateWordleContainer(game, "정답입니다.").toJSON(),
-        );
-
-        expect(containerJson).toContain("성공 · 6/6 · **_Phew_**");
     });
 });

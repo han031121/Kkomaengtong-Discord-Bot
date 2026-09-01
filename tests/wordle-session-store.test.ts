@@ -5,8 +5,9 @@ import { DatabaseSync } from "node:sqlite";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { createWordleGame, submitGuess } from "../src/features/wordle/game.js";
-import { getPreviousWordlePrintDate, WordleDataStore } from "../src/features/wordle/data-store.js";
+import { createWordleGame, submitGuess } from "../src/features/wordle/domain/game.js";
+import { getPreviousWordlePrintDate } from "../src/features/wordle/domain/print-date.js";
+import { WordleDataStore } from "../src/features/wordle/infrastructure/persistence/wordle-data-store.js";
 import { WORDLE_TEST_IDS, WORDLE_TEST_PUZZLE } from "./wordle-test-helpers.js";
 import { createLostGame } from "./wordle-test-helpers.js";
 

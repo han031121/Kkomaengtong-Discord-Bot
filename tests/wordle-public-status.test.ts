@@ -9,15 +9,17 @@ import {
     publishPendingYesterdayWordleRecords,
     sendPublicWordlePanel,
     updatePublicWordlePanel,
-    WordleSessionStore,
-} from "../src/commands/wordle.js";
-import { createWordleGame, submitGuess } from "../src/features/wordle/game.js";
-import { WordlePuzzleCache } from "../src/features/wordle/puzzle-cache.js";
+} from "../src/features/wordle/index.js";
+import type { WordleSessionStore } from "../src/features/wordle/index.js";
+import { createWordleGame, submitGuess } from "../src/features/wordle/domain/game.js";
+import { WordlePuzzleCache } from "../src/features/wordle/application/puzzle-cache.js";
 import {
     createButtonInteraction,
     createCommandInteraction,
     createPuzzleProvider,
     createSession,
+    createWordleDependencies,
+    createWordleStore,
     getCallArgument,
     getComponentJson,
     seedSession,
@@ -41,11 +43,11 @@ interface StatusPanelScenarioOptions {
 }
 
 function createStatusPanelScenario(options: StatusPanelScenarioOptions) {
-    const store = new WordleSessionStore();
+    const store = createWordleStore();
     const send = vi.fn();
     const context = createButtonInteraction(wordleButtonId("status-panel", options.userId), {
         channelId: options.channelId,
-        fetchMessage: options.fetchMessage,
+        ...(options.fetchMessage === undefined ? {} : { fetchMessage: options.fetchMessage }),
         send,
         userId: options.userId,
     });
@@ -88,7 +90,10 @@ describe("Wordle 공개 현황 패널 접근", () => {
         });
 
         scenario.send.mockResolvedValue(newMessage);
-        await handleWordleButton(scenario.context.interaction, scenario.store);
+        await handleWordleButton(
+            scenario.context.interaction,
+            createWordleDependencies(scenario.store),
+        );
 
         expect(fetchMessage).toHaveBeenCalledWith({ force: true, message: oldMessageId });
         expect(fetchMessage).toHaveBeenCalledWith({ after: oldMessageId, limit: 1 });
@@ -109,7 +114,10 @@ describe("Wordle 공개 현황 패널 접근", () => {
         const scenario = createStatusPanelScenario({ channelId, userId });
 
         scenario.send.mockResolvedValue(statusMessage);
-        await handleWordleButton(scenario.context.interaction, scenario.store);
+        await handleWordleButton(
+            scenario.context.interaction,
+            createWordleDependencies(scenario.store),
+        );
 
         expect(scenario.context.fetchMessage).not.toHaveBeenCalled();
         expect(scenario.store.getPublicStatusPanel(guildId, channelId)?.messageId).toBe(
@@ -142,7 +150,10 @@ describe("Wordle 공개 현황 패널 접근", () => {
         });
 
         scenario.send.mockResolvedValue(replacementMessage);
-        await handleWordleButton(scenario.context.interaction, scenario.store);
+        await handleWordleButton(
+            scenario.context.interaction,
+            createWordleDependencies(scenario.store),
+        );
 
         expect(fetchMessage).toHaveBeenCalledWith({ force: true, message: deletedMessageId });
         expect(scenario.store.getPublicStatusPanel(guildId, channelId)?.messageId).toBe(
@@ -174,7 +185,10 @@ describe("Wordle 공개 현황 패널 접근", () => {
             userId,
         });
 
-        await handleWordleButton(scenario.context.interaction, scenario.store);
+        await handleWordleButton(
+            scenario.context.interaction,
+            createWordleDependencies(scenario.store),
+        );
 
         expect(fetchMessage).toHaveBeenCalledWith({ force: true, message: statusMessageId });
         expect(fetchMessage).toHaveBeenCalledWith({ after: statusMessageId, limit: 1 });
@@ -209,20 +223,13 @@ describe("Wordle 개인 공개 패널 전송", () => {
         expect(getCallArgument<Record<string, unknown>>(send)).not.toHaveProperty("content");
     });
 
-    it.each([
-        {
-            editable: false,
-            edit: vi.fn(),
-            name: "수정할 수 없는",
-        },
-        {
-            editable: true,
-            edit: vi.fn().mockRejectedValue({ code: "10008" }),
-            name: "삭제된",
-        },
-    ])(
-        "$name 기존 패널은 새 메시지를 생성하지 않고 갱신을 중단합니다",
-        async ({ edit, editable }) => {
+    it("수정할 수 없거나 삭제된 기존 패널은 새 메시지 없이 갱신을 중단합니다", async () => {
+        const scenarios = [
+            { editable: false, edit: vi.fn() },
+            { editable: true, edit: vi.fn().mockRejectedValue({ code: "10008" }) },
+        ];
+
+        for (const { edit, editable } of scenarios) {
             const send = vi.fn();
             const context = createCommandInteraction({ send });
             const game = submitGuess(createWordleGame(puzzle), "crane");
@@ -240,8 +247,8 @@ describe("Wordle 개인 공개 패널 전송", () => {
 
             expect(edit).toHaveBeenCalledTimes(editable ? 1 : 0);
             expect(send).not.toHaveBeenCalled();
-        },
-    );
+        }
+    });
 });
 
 const currentPuzzle = {
@@ -253,7 +260,7 @@ const currentPuzzle = {
 };
 
 function createStoreWithYesterdayRecord(): WordleSessionStore {
-    const store = new WordleSessionStore();
+    const store = createWordleStore();
     const game = submitGuess(createWordleGame(puzzle), "crane");
 
     store.set(
@@ -326,12 +333,10 @@ describe("어제 Wordle 기록판", () => {
     it("/워들 어제기록_test는 현재 채널에 어제 기록판을 출력합니다", async () => {
         const store = createStoreWithYesterdayRecord();
         const context = createCommandInteraction({ subcommand: "어제기록_test" });
-        const command = createWordleCommand(
-            store,
-            createPuzzleProvider(currentPuzzle),
-            undefined,
-            true,
-        );
+        const command = createWordleCommand({
+            ...createWordleDependencies(store, createPuzzleProvider(currentPuzzle)),
+            enableTestCommands: true,
+        });
 
         await command.execute(context.interaction);
 
@@ -385,7 +390,11 @@ describe("어제 Wordle 기록판", () => {
         });
 
         try {
-            await createWordleCommand(store, cache, cache, true).execute(context.interaction);
+            await createWordleCommand({
+                ...createWordleDependencies(store, cache),
+                enableTestCommands: true,
+                puzzleRefresher: cache,
+            }).execute(context.interaction);
 
             expect(getPuzzle).toHaveBeenCalledTimes(2);
             expect(fetchChannel).toHaveBeenCalledWith(WORDLE_TEST_IDS.channel);
