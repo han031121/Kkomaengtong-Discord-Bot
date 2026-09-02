@@ -1,7 +1,7 @@
 import { MessageFlags } from "discord.js";
 import type { ChatInputCommandInteraction } from "discord.js";
 
-import { WORDLE_RECORDS_USER_OPTION_NAME } from "../command-definition.js";
+import { WORDLE_COMMAND } from "../command-metadata.js";
 import { SUPPRESSED_ALLOWED_MENTIONS } from "../interactions/components.js";
 import { getWordleGuildId } from "../interactions/private-state.js";
 import { createPersonalWordleRecordContainer } from "../panel.js";
@@ -16,7 +16,9 @@ export async function runWordleRecords(
     interaction: ChatInputCommandInteraction,
     store: WordleSessionStore,
 ): Promise<void> {
-    const selectedUser = interaction.options.getUser(WORDLE_RECORDS_USER_OPTION_NAME);
+    const selectedUser = interaction.options.getUser(
+        WORDLE_COMMAND.subcommands.records.userOption.name,
+    );
 
     if (selectedUser !== null) {
         const record = store.getPersonalRecord(selectedUser.id);
