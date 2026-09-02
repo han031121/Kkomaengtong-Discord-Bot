@@ -60,6 +60,58 @@ describe("Wordle 실행 흐름", () => {
         }
     });
 
+    it("/워들 공유는 기존 공개 패널을 새 진행 현황으로 교체합니다", async () => {
+        const store = createWordleStore();
+        const deletePreviousPanel = vi.fn().mockResolvedValue(undefined);
+        const deletePrivateResponse = vi.fn().mockResolvedValue(undefined);
+        const privateResponseInteraction = {
+            deleteReply: deletePrivateResponse,
+            id: "existing-private-interaction",
+        } as unknown as ChatInputCommandInteraction;
+        const previousPanelMessage = {
+            delete: deletePreviousPanel,
+            id: "previous-command-panel",
+        } as unknown as Message;
+        const replacementPanelMessage = { id: "replacement-command-panel" } as Message;
+        const send = vi.fn().mockResolvedValue(replacementPanelMessage);
+        const context = createCommandInteraction({ send, subcommand: "공유" });
+
+        seedSession(store, {
+            game: submitGuess(createWordleGame(puzzle), "crane"),
+            panelMessage: previousPanelMessage,
+            privateResponseInteraction,
+            privateResponseMessageId: "existing-private-message",
+        });
+        await createWordleCommand(createWordleDependencies(store, createPuzzleProvider())).execute(
+            context.interaction,
+        );
+
+        expect(context.deferReply).toHaveBeenCalledOnce();
+        expect(deletePreviousPanel).toHaveBeenCalledOnce();
+        expect(deletePrivateResponse).not.toHaveBeenCalled();
+        expect(send).toHaveBeenCalledOnce();
+        expect(store.get(WORDLE_TEST_IDS.user, puzzle.printDate, guildId)).toMatchObject({
+            panelMessage: replacementPanelMessage,
+            privateResponseInteraction,
+            privateResponseMessageId: "existing-private-message",
+        });
+        expect(getComponentJson(send)).toContain("진행 중 · 1/6");
+        expect(getComponentJson(context.editReply)).toContain("현재 Wordle 게임을 공유했습니다.");
+        expect(getComponentJson(context.editReply)).not.toContain("discord.com/channels");
+        expect(getComponentJson(context.editReply)).not.toContain("### 나의 Wordle");
+    });
+
+    it("/워들 공유는 오늘 게임이 없으면 시작 방법을 안내합니다", async () => {
+        const context = createCommandInteraction({ subcommand: "공유" });
+
+        await createWordleCommand(
+            createWordleDependencies(createWordleStore(), createPuzzleProvider()),
+        ).execute(context.interaction);
+
+        expect(context.send).not.toHaveBeenCalled();
+        expect(getComponentJson(context.editReply)).toContain("공유할 Wordle 게임이 없습니다.");
+    });
+
     it("오늘 퍼즐 캐시가 없으면 전용 안내 화면을 표시합니다", async () => {
         const context = createCommandInteraction();
         const puzzleProvider = {
@@ -92,7 +144,7 @@ describe("Wordle 실행 흐름", () => {
         );
     });
 
-    it("/워들 기록은 저장된 개인 기록을 표시합니다", async () => {
+    it("/워들 통계는 저장된 개인 기록을 표시합니다", async () => {
         const store = createWordleStore();
         const gameContext = createCommandInteraction();
 
@@ -105,7 +157,7 @@ describe("Wordle 실행 흐름", () => {
 
         const recordContext = createCommandInteraction({
             recordUserId: WORDLE_TEST_IDS.user,
-            subcommand: "기록",
+            subcommand: "통계",
         });
         await createWordleCommand(createWordleDependencies(store, createPuzzleProvider())).execute(
             recordContext.interaction,
@@ -117,8 +169,8 @@ describe("Wordle 실행 흐름", () => {
         expect(panelJson).toContain("사전 미등록 단어 입력 횟수: **1회**");
     });
 
-    it("/워들 기록은 기록 보유자가 없으면 빈 서버 순위를 표시합니다", async () => {
-        const context = createCommandInteraction({ subcommand: "기록" });
+    it("/워들 통계는 기록 보유자가 없으면 빈 서버 순위를 표시합니다", async () => {
+        const context = createCommandInteraction({ subcommand: "통계" });
 
         await createWordleCommand(
             createWordleDependencies(createWordleStore(), createPuzzleProvider()),

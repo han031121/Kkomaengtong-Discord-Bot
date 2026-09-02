@@ -114,7 +114,7 @@ interface CommandInteractionOptions extends InteractionOptions {
     deferred?: boolean;
     guess?: string | null;
     recordUserId?: string;
-    subcommand?: "갱신_test" | "기록" | "어제기록_test" | "입력" | "점수판" | "플레이";
+    subcommand?: "갱신_test" | "공유" | "어제기록_test" | "입력" | "점수판" | "통계" | "플레이";
 }
 
 export function createCommandInteraction(options: CommandInteractionOptions = {}) {

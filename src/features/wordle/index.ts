@@ -3,6 +3,7 @@ export {
     runWordle,
     runWordleRecords,
     runWordleScoreboard,
+    runWordleShare,
 } from "./presentation/command.js";
 export type {
     CreateWordleCommandOptions,

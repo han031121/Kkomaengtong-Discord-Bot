@@ -5,7 +5,7 @@ import { WORDLE_COMMAND } from "./command-metadata.js";
 export { WORDLE_COMMAND } from "./command-metadata.js";
 
 export function createWordleCommandData(enableTestCommands: boolean) {
-    const { play, input, records, refreshTest, scoreboard, yesterdayRecordTest } =
+    const { play, input, share, records, refreshTest, scoreboard, yesterdayRecordTest } =
         WORDLE_COMMAND.subcommands;
     const data = new SlashCommandBuilder()
         .setName(WORDLE_COMMAND.name)
@@ -13,6 +13,9 @@ export function createWordleCommandData(enableTestCommands: boolean) {
         .setDMPermission(false)
         .addSubcommand((subcommand) =>
             subcommand.setName(play.name).setDescription(play.description),
+        )
+        .addSubcommand((subcommand) =>
+            subcommand.setName(share.name).setDescription(share.description),
         )
         .addSubcommand((subcommand) =>
             subcommand

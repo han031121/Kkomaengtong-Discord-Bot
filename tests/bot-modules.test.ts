@@ -186,15 +186,17 @@ describe("기능 레지스트리", () => {
 
         expect(production.options?.map((option) => option.name)).toEqual([
             "플레이",
+            "공유",
             "입력",
             "점수판",
-            "기록",
+            "통계",
         ]);
         expect(development.options?.map((option) => option.name)).toEqual([
             "플레이",
+            "공유",
             "입력",
             "점수판",
-            "기록",
+            "통계",
             "갱신_test",
             "어제기록_test",
         ]);

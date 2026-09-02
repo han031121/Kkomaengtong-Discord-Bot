@@ -16,6 +16,10 @@ export const WORDLE_COMMAND = {
                 maxLength: 5,
             },
         },
+        share: {
+            name: "공유",
+            description: "사용자의 현재 플레이 현황 또는 결과를 채팅으로 공유합니다.",
+        },
         scoreboard: {
             name: "점수판",
             description: "현재 서버의 오늘 Wordle 점수판을 표시합니다.",

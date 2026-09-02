@@ -1,6 +1,7 @@
 import type { BotCommand, BotCommandData } from "../../../bot/contracts.js";
 import { runWordle } from "./actions/play.js";
 import type { RunWordleOptions } from "./actions/play.js";
+import { runWordleShare } from "./actions/share.js";
 import { runWordleRecords } from "./actions/records.js";
 import { runWordleScoreboard } from "./actions/scoreboard.js";
 import { createWordleCommandData, WORDLE_COMMAND } from "./command-definition.js";
@@ -14,8 +15,9 @@ export type { RunWordleOptions } from "./actions/play.js";
 export { runWordle } from "./actions/play.js";
 export { runWordleRecords } from "./actions/records.js";
 export { runWordleScoreboard } from "./actions/scoreboard.js";
+export { runWordleShare } from "./actions/share.js";
 
-const { input, play, records, refreshTest, scoreboard, yesterdayRecordTest } =
+const { input, play, share, records, refreshTest, scoreboard, yesterdayRecordTest } =
     WORDLE_COMMAND.subcommands;
 
 export interface CreateWordleCommandOptions extends WordleInteractionDependencies {
@@ -53,6 +55,8 @@ export function createWordleCommand(options: CreateWordleCommandOptions): BotCom
                     };
                     return runWordle(interaction, runOptions);
                 }
+                case share.name:
+                    return runWordleShare(interaction, options);
                 case scoreboard.name:
                     return runWordleScoreboard(interaction, options.store, options.puzzleProvider);
                 case records.name:

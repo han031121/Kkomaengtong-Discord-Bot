@@ -144,8 +144,7 @@ describe("Wordle 버튼 상호작용", () => {
             replacementPanelMessage,
         );
         expect(getComponentJson(send)).toContain("종료 · X/6");
-        expect(getComponentJson(context.editReply)).toContain('"label":"결과 공유"');
-        expect(getComponentJson(context.editReply)).toContain('"disabled":false');
+        expect(context.editReply).not.toHaveBeenCalled();
     });
 
     it("공개 현황의 보기 버튼은 누구나 최신 보드를 비공개로 확인합니다", async () => {
@@ -215,10 +214,11 @@ describe("Wordle 버튼 상호작용", () => {
         });
     });
 
-    it("현황 공유를 다시 누르면 기존 패널을 삭제하고 버튼을 유지합니다", async () => {
+    it("최근에 보낸 현황 공유도 기존 패널을 삭제하고 새로 전송합니다", async () => {
         const store = createWordleStore();
         const deletePreviousPanel = vi.fn().mockResolvedValue(undefined);
         const previousPanelMessage = {
+            createdTimestamp: Date.now(),
             delete: deletePreviousPanel,
             id: "previous-public-panel",
         } as unknown as Message;
@@ -234,8 +234,7 @@ describe("Wordle 버튼 상호작용", () => {
         expect(store.get(userId, puzzle.printDate, guildId)?.panelMessage).toBe(
             replacementPanelMessage,
         );
-        expect(getComponentJson(context.editReply)).toContain("현재 진행 상황을 공개했습니다.");
-        expect(getComponentJson(context.editReply)).toContain("현황 공유");
+        expect(context.editReply).not.toHaveBeenCalled();
     });
 
     it("기존 진행 공유 버튼도 통합된 공유 동작을 수행합니다", async () => {
@@ -248,7 +247,7 @@ describe("Wordle 버튼 상호작용", () => {
 
         expect(context.deferUpdate).toHaveBeenCalledOnce();
         expect(send).toHaveBeenCalledOnce();
-        expect(getComponentJson(context.editReply)).toContain("현재 진행 상황을 공개했습니다.");
+        expect(context.editReply).not.toHaveBeenCalled();
     });
 });
 
@@ -460,7 +459,7 @@ describe("Wordle 모달 입력", () => {
         expect(getComponentJson(statusEdit)).not.toContain("apple");
     });
 
-    it("공유 중인 게임은 입력 후 공개 패널과 비공개 화면을 함께 수정합니다", async () => {
+    it("공유 중인 게임은 입력 후 공개 패널을 자동으로 수정합니다", async () => {
         const store = createWordleStore();
         const panelMessage = { editable: true } as Message;
         const panelEdit = vi.fn().mockResolvedValue(panelMessage);

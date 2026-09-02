@@ -2,10 +2,10 @@ import { MessageFlags } from "discord.js";
 import type { ButtonInteraction } from "discord.js";
 
 import { runWordle } from "../actions/play.js";
+import { shareWordleSession } from "../actions/share.js";
 import { createPublicWordleContainer, createWordlePlayActionRow } from "../panel.js";
 import { accessWordlePublicStatusPanel } from "../public-panels/status-board-access.js";
-import { replacePublicWordlePanel } from "../public-panels/shared-game-panel.js";
-import type { WordleSession, WordleSessionStore } from "../session-store.js";
+import type { WordleSessionStore } from "../session-store.js";
 import {
     createEphemeralNoticeResponse,
     createNoticeEditResponse,
@@ -70,42 +70,8 @@ async function handleShareButton(
     parsedButton: ParsedWordleTargetButton,
     dependencies: WordleInteractionDependencies,
 ): Promise<void> {
-    const { store, userLock } = dependencies;
-    const guildId = getWordleGuildId(interaction);
-
     await interaction.deferUpdate();
-    await userLock.runExclusive(parsedButton.userId, async () => {
-        const latestSession = store.get(parsedButton.userId, parsedButton.printDate, guildId);
-
-        if (latestSession === undefined) {
-            await interaction.editReply(
-                createNoticeEditResponse(
-                    "Wordle 게임 정보를 찾을 수 없습니다. `/워들 플레이`로 게임을 다시 시작해 주세요.",
-                ),
-            );
-            return;
-        }
-
-        const sharedPanelMessage = await replacePublicWordlePanel(
-            interaction,
-            latestSession,
-            latestSession.game,
-        );
-        const sharedSession: WordleSession = {
-            ...latestSession,
-            panelMessage: sharedPanelMessage,
-        };
-        store.set(parsedButton.userId, parsedButton.printDate, guildId, sharedSession);
-
-        await updatePrivateWordleState(
-            interaction,
-            sharedSession,
-            sharedSession.game.status === "playing"
-                ? "현재 진행 상황을 공개했습니다."
-                : createCompletedResponse(sharedSession),
-            store,
-        );
-    });
+    await shareWordleSession(interaction, parsedButton.printDate, dependencies);
 }
 
 async function handlePublicStatusViewButton(
