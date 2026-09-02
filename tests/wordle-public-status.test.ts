@@ -399,7 +399,7 @@ describe("어제 Wordle 기록판", () => {
             expect(getPuzzle).toHaveBeenCalledTimes(2);
             expect(fetchChannel).toHaveBeenCalledWith(WORDLE_TEST_IDS.channel);
             expect(send).toHaveBeenCalledOnce();
-            expect(getCallArgument<{ content: string }>(context.editReply).content).toContain(
+            expect(getComponentJson(context.editReply)).toContain(
                 "자정과 동일한 Wordle 날짜 전환 및 어제 기록판 전송 처리를 완료했습니다.",
             );
             expect(store.listPendingYesterdayAnnouncements(currentPuzzle.printDate)).toEqual([]);

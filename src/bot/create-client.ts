@@ -1,7 +1,8 @@
-import { Client, Collection, Events, GatewayIntentBits, MessageFlags } from "discord.js";
+import { Client, Collection, Events, GatewayIntentBits } from "discord.js";
 import type { Interaction, RepliableInteraction } from "discord.js";
 
 import type { BotCommand, BotModule } from "./contracts.js";
+import { createEphemeralNoticeResponse, createNoticeEditResponse } from "./response-builders.js";
 
 interface InteractionRouterState {
     readonly activeTasks: Set<Promise<void>>;
@@ -179,16 +180,13 @@ async function routeInteraction(
 }
 
 async function sendErrorResponse(interaction: RepliableInteraction): Promise<void> {
-    const response = {
-        content: "요청을 처리하는 중 오류가 발생했습니다.",
-        flags: MessageFlags.Ephemeral,
-    } as const;
+    const content = "요청을 처리하는 중 오류가 발생했습니다.";
 
     if (interaction.deferred) {
-        await interaction.editReply({ content: response.content });
+        await interaction.editReply(createNoticeEditResponse(content));
     } else if (interaction.replied) {
-        await interaction.followUp(response);
+        await interaction.followUp(createEphemeralNoticeResponse(content));
     } else {
-        await interaction.reply(response);
+        await interaction.reply(createEphemeralNoticeResponse(content));
     }
 }

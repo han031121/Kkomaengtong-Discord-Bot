@@ -1,7 +1,6 @@
 export {
     createPrivateWordleContainer,
     createPublicWordleContainer,
-    createWordleNoticeContainer,
     createWordleSpoilerContainer,
 } from "./views/game-panel.js";
 export {

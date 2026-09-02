@@ -1,6 +1,6 @@
-import { MessageFlags } from "discord.js";
 import type { ChatInputCommandInteraction } from "discord.js";
 
+import { createEphemeralNoticeResponse } from "../../../bot/response-builders.js";
 import { getPreviousWordlePrintDate } from "../domain/print-date.js";
 import type { WordlePuzzleProvider } from "./command.js";
 import { getWordleGuildId } from "./interaction-builders.js";
@@ -22,10 +22,9 @@ export async function runYesterdayWordleTest(
         response = createYesterdayWordleRecordResponse(store, guildId, recordDate);
     } catch (error) {
         console.warn("어제 Wordle 테스트 기록판을 생성하지 못했습니다.", error);
-        await interaction.reply({
-            content: "표시할 어제 Wordle 기록이 없습니다.",
-            flags: MessageFlags.Ephemeral,
-        });
+        await interaction.reply(
+            createEphemeralNoticeResponse("표시할 어제 Wordle 기록이 없습니다."),
+        );
         return;
     }
 

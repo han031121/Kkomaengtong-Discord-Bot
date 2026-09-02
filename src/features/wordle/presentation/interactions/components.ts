@@ -1,13 +1,7 @@
 import { LabelBuilder, ModalBuilder, TextInputBuilder } from "@discordjs/builders";
-import {
-    ActionRowBuilder,
-    ButtonBuilder,
-    ButtonStyle,
-    MessageFlags,
-    TextInputStyle,
-} from "discord.js";
+import { ActionRowBuilder, ButtonBuilder, ButtonStyle, TextInputStyle } from "discord.js";
 
-import { createPrivateWordleContainer, createWordleNoticeContainer } from "../panel.js";
+import { createPrivateWordleContainer } from "../panel.js";
 import type { WordleSession } from "../session-store.js";
 import {
     createWordleButtonCustomId,
@@ -138,18 +132,7 @@ export function createPrivatePanel(session: WordleSession, userId: string, notic
     return container;
 }
 
-export function createEphemeralNoticeResponse(content: string) {
-    return {
-        components: [createWordleNoticeContainer(content)],
-        flags: MessageFlags.Ephemeral | MessageFlags.IsComponentsV2,
-    };
-}
-
-export function createNoticeEditResponse(content: string) {
-    return {
-        content: null,
-        embeds: [],
-        components: [createWordleNoticeContainer(content)],
-        flags: MessageFlags.IsComponentsV2 as const,
-    };
-}
+export {
+    createEphemeralNoticeResponse,
+    createNoticeEditResponse,
+} from "../../../../bot/response-builders.js";

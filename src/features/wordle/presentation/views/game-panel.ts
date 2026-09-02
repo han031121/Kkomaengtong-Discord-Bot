@@ -80,12 +80,6 @@ export function createWordleSpoilerContainer(
         );
 }
 
-export function createWordleNoticeContainer(content: string): ContainerBuilder {
-    return new ContainerBuilder()
-        .setAccentColor(Colors.Yellow)
-        .addTextDisplayComponents(new TextDisplayBuilder().setContent(content));
-}
-
 function createGuessHistory(game: WordleGame): string {
     if (game.guesses.length === 0) {
         return "아직 입력한 단어가 없습니다.";

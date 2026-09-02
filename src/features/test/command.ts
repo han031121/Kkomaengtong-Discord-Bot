@@ -1,7 +1,8 @@
-import { MessageFlags, SlashCommandBuilder, time, TimestampStyles } from "discord.js";
+import { SlashCommandBuilder, time, TimestampStyles } from "discord.js";
 import type { ChatInputCommandInteraction } from "discord.js";
 
 import type { BotCommand } from "../../bot/contracts.js";
+import { createEphemeralNoticeResponse } from "../../bot/response-builders.js";
 
 const TEST_COMMAND_CHOICES = [
     { name: "핑", value: "ping" },
@@ -85,9 +86,8 @@ export const testCommand: BotCommand = {
     async execute(interaction) {
         const selection = interaction.options.getString("기능", true);
 
-        await interaction.reply({
-            content: createSelectionResponse(interaction, selection),
-            flags: MessageFlags.Ephemeral,
-        });
+        await interaction.reply(
+            createEphemeralNoticeResponse(createSelectionResponse(interaction, selection)),
+        );
     },
 };

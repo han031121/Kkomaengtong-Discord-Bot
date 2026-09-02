@@ -5,6 +5,10 @@ import { describe, expect, it, vi } from "vitest";
 import { collectCommandData, createFeatureRegistrations } from "../src/app/feature-registry.js";
 import type { BotCommand, BotCommandData, BotModule } from "../src/bot/contracts.js";
 import { createClient, startBotModules, stopBot } from "../src/bot/create-client.js";
+import {
+    createEphemeralNoticeResponse,
+    createNoticeEditResponse,
+} from "../src/bot/response-builders.js";
 
 function createCommand(
     name: string,
@@ -38,6 +42,22 @@ function getCommandData(name: string, commands: readonly BotCommandData[]) {
 
     return command.toJSON();
 }
+
+describe("Component V2 안내 응답", () => {
+    it("최초 ephemeral 응답과 수정 응답을 안내 상자로 구성합니다", () => {
+        const initialResponse = createEphemeralNoticeResponse("최초 안내");
+        const editResponse = createNoticeEditResponse("수정 안내");
+
+        expect(initialResponse.flags).toBe(32_832);
+        expect(JSON.stringify(initialResponse.components[0]?.toJSON())).toContain("최초 안내");
+        expect(editResponse).toMatchObject({
+            content: null,
+            embeds: [],
+            flags: 32_768,
+        });
+        expect(JSON.stringify(editResponse.components[0]?.toJSON())).toContain("수정 안내");
+    });
+});
 
 describe("봇 기능 모듈", () => {
     it("슬래시 명령과 그 외 인터랙션을 주입된 기능에 라우팅합니다", async () => {
