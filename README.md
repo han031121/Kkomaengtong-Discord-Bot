@@ -6,7 +6,7 @@ TypeScript와 discord.js로 만든 간단한 Discord 슬래시 명령어 봇입�
 
 ## 포함된 기능
 
-- `/테스트 기능:<선택>`: 명령어 옵션에서 다음 기능 중 하나를 실행
+- 개발용 봇 전용 `/테스트 기능:<선택>`: 명령어 옵션에서 다음 기능 중 하나를 실행
     - 핑: 봇의 WebSocket 응답 속도 확인
     - 서버: 현재 서버 이름, ID, 멤버 수 확인
     - 사용자: 내 Discord 계정 정보 확인
@@ -100,7 +100,7 @@ TypeScript와 discord.js로 만든 간단한 Discord 슬래시 명령어 봇입�
 
     `npm run dev`와 `npm run deploy:commands:dev`는 `.env.development`만 읽습니다. `npm start`와 `npm run deploy:commands`는 `.env`만 읽습니다.
     `DISCORD_GUILD_ID`는 선택 사항입니다. 개발 중에는 서버 ID를 지정하는 편이 명령어가 즉시 반영되어 편리합니다. 비워 두면 전역 명령어로 등록됩니다.
-    `ENABLE_TEST_COMMANDS`가 `true`이면 `/워들 갱신_test`와 `/워들 어제기록_test`를 명령 정의와 실행 경로에 포함합니다. 메인 봇에서는 `false`, 개발용 봇에서는 `true`로 설정합니다. 메인 명령을 다시 배포하면 테스트 서브커맨드는 Discord 명령 일괄 갱신 과정에서 자동으로 제거됩니다.
+    `ENABLE_TEST_COMMANDS`가 `true`이면 `/테스트`, `/워들 갱신_test`, `/워들 어제기록_test`를 명령 정의와 실행 경로에 포함합니다. 메인 봇에서는 `false`, 개발용 봇에서는 `true`로 설정합니다. 메인 명령을 다시 배포하면 테스트 명령과 서브커맨드는 Discord 명령 일괄 갱신 과정에서 자동으로 제거됩니다.
     `WORDLE_DATABASE_PATH`도 선택 사항이며 기본값은 `data/wordle.sqlite`입니다. 지정한 상위 디렉터리가 없으면 봇 시작 시 자동으로 생성합니다.
 
 5. Developer Portal의 OAuth2 URL 생성기에서 `bot`과 `applications.commands` 범위를 선택하여 봇을 서버에 초대합니다. 현재 예제 명령어에는 별도의 관리자 권한이 필요하지 않습니다.

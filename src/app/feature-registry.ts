@@ -10,13 +10,18 @@ export interface FeatureRegistryOptions {
 export function createFeatureRegistrations(
     options: FeatureRegistryOptions,
 ): readonly BotModuleRegistration[] {
-    const registrations = [
-        createTestRegistration(),
+    const registrations: BotModuleRegistration[] = [];
+
+    if (options.enableTestCommands) {
+        registrations.push(createTestRegistration());
+    }
+
+    registrations.push(
         createWordleRegistration({
             databasePath: options.wordleDatabasePath,
             enableTestCommands: options.enableTestCommands,
         }),
-    ];
+    );
 
     validateRegistrations(registrations);
     return registrations;

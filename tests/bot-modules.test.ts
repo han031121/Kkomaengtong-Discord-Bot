@@ -180,7 +180,7 @@ describe("봇 기능 모듈", () => {
 
 describe("기능 레지스트리", () => {
     it("중복 없이 직렬화 가능한 명령 정의를 제공합니다", () => {
-        const commands = createCommandData();
+        const commands = createCommandData(true);
         const names = commands.map((command) => command.name);
         const testCommand = getCommandData("테스트", commands);
 
@@ -198,6 +198,27 @@ describe("기능 레지스트리", () => {
         expect(JSON.stringify(testCommand.options?.[0])).toContain(
             JSON.stringify({ name: "인사", value: "greeting" }),
         );
+    });
+
+    it("테스트 명령은 개발 환경에서만 등록합니다", () => {
+        const productionRegistrations = createFeatureRegistrations({
+            enableTestCommands: false,
+            wordleDatabasePath: ":memory:",
+        });
+        const developmentRegistrations = createFeatureRegistrations({
+            enableTestCommands: true,
+            wordleDatabasePath: ":memory:",
+        });
+
+        expect(productionRegistrations.map((registration) => registration.name)).toEqual([
+            "wordle",
+        ]);
+        expect(developmentRegistrations.map((registration) => registration.name)).toEqual([
+            "test",
+            "wordle",
+        ]);
+        expect(createCommandData(false).map((command) => command.name)).not.toContain("테스트");
+        expect(createCommandData(true).map((command) => command.name)).toContain("테스트");
     });
 
     it("운영과 개발 환경에 맞는 Wordle 서브커맨드를 제공합니다", () => {
